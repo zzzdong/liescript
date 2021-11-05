@@ -1,0 +1,467 @@
+use nom::{
+    branch::alt,
+    bytes::complete::{is_not, tag, take_until},
+    character::complete::{
+        alpha1, alphanumeric1, anychar, char, multispace0, multispace1, one_of, space0, space1,
+    },
+    combinator::{map_res, opt, recognize, value},
+    error::ParseError,
+    multi::{many0, many1},
+    sequence::{delimited, pair, preceded, separated_pair, terminated, tuple},
+    IResult,
+};
+use pest_derive::Parser;
+
+use crate::ast::*;
+use crate::token::*;
+
+#[derive(Parser)]
+#[grammar = "grammar.pest"]
+struct PestParser;
+
+struct LieParse {}
+
+pub fn parse_let_stmt(input: &str) -> IResult<&str, Ast> {
+    let (input, _) = tag("let")(input)?;
+
+    let (input, (ident, expr)) = separated_pair(
+        preceded(multispace1, parse_identifier),
+        delimited(multispace0, tag("="), multispace0),
+        parse_expr,
+    )(input)?;
+
+    let let_stmt = LetStmt {
+        ident: ident.to_string(),
+        expr: expr,
+    };
+
+    Ok((input, Ast::Let(let_stmt)))
+}
+
+fn parens(i: &str) -> IResult<&str, Expr> {
+    delimited(space0, delimited(tag("("), parse_expr, tag(")")), space0)(i)
+}
+
+fn prefix(i: &str) -> IResult<&str, Expr> {
+    let (i, op) = alt((
+        value(PrefixOp::Neg, tag("-")),
+        value(PrefixOp::Not, tag("!")),
+    ))(i)?;
+
+    let (i, num) = parse_expr(i)?;
+
+    let prefix_expr = PrefixOpExpr {
+        op,
+        rhs: Box::new(num),
+    };
+
+    Ok((i, Expr::Prefix(prefix_expr)))
+}
+
+fn factor(i: &str) -> IResult<&str, Expr> {
+    alt((
+        delimited(
+            space0,
+            alt((parse_literal_expr, parse_ident_expr, prefix)),
+            space0,
+        ),
+        parens,
+    ))(i)
+}
+
+fn dot(i: &str) -> IResult<&str, Expr> {
+    let (i, init) = factor(i)?;
+
+    let (i, rest) = many0(pair(value(Operator::Dot, char('.')), factor))(i)?;
+
+    let mut lhs = init;
+
+    for (op, rhs) in rest {
+        lhs = Expr::BinOp(BinOpExpr {
+            op,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+        })
+    }
+
+    let a = -1 + -2 + 3 - 4;
+
+    Ok((i, lhs))
+}
+
+fn power(i: &str) -> IResult<&str, Expr> {
+    let (i, init) = dot(i)?;
+
+    let (i, rest) = many0(pair(value(Operator::Pow, char('^')), dot))(i)?;
+
+    let mut lhs = init;
+
+    for (op, rhs) in rest {
+        lhs = Expr::BinOp(BinOpExpr {
+            op,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+        })
+    }
+
+    Ok((i, lhs))
+}
+
+fn term(i: &str) -> IResult<&str, Expr> {
+    let (i, init) = power(i)?;
+
+    let (i, rest) = many0(pair(
+        alt((
+            value(Operator::Mul, char('*')),
+            value(Operator::Div, char('/')),
+            value(Operator::Mod, char('%')),
+        )),
+        power,
+    ))(i)?;
+
+    let mut lhs = init;
+
+    for (op, rhs) in rest {
+        lhs = Expr::BinOp(BinOpExpr {
+            op,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+        })
+    }
+
+    Ok((i, lhs))
+}
+
+fn parse_expr(i: &str) -> IResult<&str, Expr> {
+    let (i, init) = term(i)?;
+
+    let (i, rest) = many0(pair(
+        alt((
+            value(Operator::Plus, char('+')),
+            value(Operator::Minus, char('-')),
+        )),
+        term,
+    ))(i)?;
+
+    let mut lhs = init;
+
+    for (op, rhs) in rest {
+        lhs = Expr::BinOp(BinOpExpr {
+            op,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+        })
+    }
+
+    Ok((i, lhs))
+}
+
+// pub fn parse_expr(input: &str) -> IResult<&str, Expr> {
+//     alt((parse_literal_expr, parse_binop_expr))(input)
+// }
+
+fn parse_binop_expr(input: &str) -> IResult<&str, Expr> {
+    let (input, lhs) = parse_expr(input)?;
+    multispace0(input)?;
+    let (input, binop) = parse_binop(input)?;
+    multispace0(input)?;
+    let (input, rhs) = parse_expr(input)?;
+
+    let binop_expr = BinOpExpr {
+        op: binop,
+        lhs: Box::new(lhs),
+        rhs: Box::new(rhs),
+    };
+
+    Ok((input, Expr::BinOp(binop_expr)))
+}
+
+fn parse_ident_expr(input: &str) -> IResult<&str, Expr> {
+    let (input, ident) = parse_identifier(input)?;
+
+    Ok((input, Expr::Ident(IdentExpr::new(ident))))
+}
+
+fn parse_literal_expr(input: &str) -> IResult<&str, Expr> {
+    let (input, lit) = parse_literal(input)?;
+
+    Ok((input, Expr::Literal(lit)))
+}
+
+fn parse_binop(input: &str) -> IResult<&str, Operator> {
+    alt((
+        value(Operator::Plus, tag("+")),
+        value(Operator::Minus, tag("-")),
+        value(Operator::Mul, tag("*")),
+        value(Operator::Div, tag("/")),
+        value(Operator::Mod, tag("%")),
+        value(Operator::And, tag("&&")),
+        value(Operator::Or, tag("||")),
+        value(Operator::Eq, tag("==")),
+        value(Operator::NotEq, tag("!=")),
+        value(Operator::Lt, tag("<")),
+        value(Operator::LtE, tag("<=")),
+        value(Operator::Gt, tag(">")),
+        value(Operator::GtE, tag(">=")),
+    ))(input)
+}
+
+pub fn parse_identifier(input: &str) -> IResult<&str, &str> {
+    let (input, ident) = recognize(pair(
+        alt((alpha1, tag("_"))),
+        many0(alt((alphanumeric1, tag("_")))),
+    ))(input)?;
+
+    Ok((input, ident))
+}
+
+pub fn parse_literal(input: &str) -> IResult<&str, LiteralExpr> {
+    alt((
+        true_lit,
+        false_lit,
+        char_lit,
+        float_lit,
+        integer_lit,
+        string_lit,
+    ))(input)
+}
+
+fn true_lit(input: &str) -> IResult<&str, LiteralExpr> {
+    let (input, _) = tag("true")(input)?;
+    Ok((input, LiteralExpr::Bool(true)))
+}
+
+fn false_lit(input: &str) -> IResult<&str, LiteralExpr> {
+    let (input, _) = tag("false")(input)?;
+    Ok((input, LiteralExpr::Bool(false)))
+}
+
+fn char_lit(input: &str) -> IResult<&str, LiteralExpr> {
+    let (input, ch) = delimited(tag("'"), anychar, tag("'"))(input)?;
+
+    Ok((input, LiteralExpr::Char(ch)))
+}
+
+fn integer_lit(input: &str) -> IResult<&str, LiteralExpr> {
+    let (input, int) = map_res(decimal, |s| {
+        let mut s = s.to_string();
+        s.retain(|c| c != '_');
+        s.parse::<i64>()
+    })(input)?;
+
+    Ok((input, LiteralExpr::Integer(int)))
+}
+
+fn float_lit(input: &str) -> IResult<&str, LiteralExpr> {
+    let (input, f) = map_res(float, |s| {
+        let mut s = s.to_string();
+        s.retain(|c| c != '_');
+        s.parse::<f64>()
+    })(input)?;
+
+    Ok((input, LiteralExpr::Float(f)))
+}
+
+fn string_lit(input: &str) -> IResult<&str, LiteralExpr> {
+    let (input, s) = double_quoted(input)?;
+
+    Ok((input, LiteralExpr::String(s)))
+}
+
+fn float(input: &str) -> IResult<&str, &str> {
+    alt((
+        // Case one: .42
+        recognize(tuple((
+            char('.'),
+            decimal,
+            opt(tuple((one_of("eE"), opt(one_of("+-")), decimal))),
+        ))), // Case two: 42e42 and 42.42e42
+        recognize(tuple((
+            decimal,
+            opt(preceded(char('.'), decimal)),
+            one_of("eE"),
+            opt(one_of("+-")),
+            decimal,
+        ))), // Case three: 42. and 42.42
+        recognize(tuple((decimal, char('.'), opt(decimal)))),
+    ))(input)
+}
+
+fn decimal(input: &str) -> IResult<&str, &str> {
+    recognize(many1(terminated(one_of("0123456789"), many0(char('_')))))(input)
+}
+
+pub fn peol_comment<'a, E: ParseError<&'a str>>(i: &'a str) -> IResult<&'a str, (), E> {
+    value(
+        (), // Output is thrown away.
+        pair(char('%'), is_not("\n\r")),
+    )(i)
+}
+
+pub fn pinline_comment<'a, E: ParseError<&'a str>>(i: &'a str) -> IResult<&'a str, (), E> {
+    value(
+        (), // Output is thrown away.
+        tuple((tag("(*"), take_until("*)"), tag("*)"))),
+    )(i)
+}
+
+pub fn double_quoted(input: &str) -> IResult<&str, String> {
+    delimited(tag("\""), |i| in_quotes(i, '"'), tag("\""))(input)
+}
+
+pub fn back_quoted(input: &str) -> IResult<&str, String> {
+    delimited(tag("`"), |i| in_quotes(i, '`'), tag("`"))(input)
+}
+
+fn in_quotes(input: &str, quote: char) -> IResult<&str, String> {
+    let mut ret = String::new();
+    let mut iter = input.chars().peekable();
+    let mut offset = 0;
+
+    loop {
+        match iter.next() {
+            Some('\\') => {
+                offset += 1;
+                let ch = iter
+                    .next()
+                    .ok_or(nom::Err::Incomplete(nom::Needed::Unknown))?;
+
+                let got = match ch {
+                    '\\' => '\\',
+                    'n' => '\n',
+                    'r' => '\r',
+                    't' => '\t',
+                    ch => {
+                        if quote == ch {
+                            ch
+                        } else {
+                            ret.push('\\');
+                            ch
+                        }
+                    }
+                };
+
+                ret.push(got);
+                offset += got.len_utf8();
+            }
+            Some(ch) => {
+                if ch == quote {
+                    return Ok((&input[offset..], ret));
+                }
+                ret.push(ch);
+                offset += ch.len_utf8();
+            }
+            None => {
+                return Err(nom::Err::Incomplete(nom::Needed::Unknown));
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::{io::BufRead, str::Chars};
+
+    use super::*;
+    use pest::Parser;
+
+    #[test]
+    fn test() {
+        let program = r#"
+        let a = 100;
+        let b = 200.0;
+        "#;
+
+        let ret = PestParser::parse(Rule::program, program).unwrap();
+
+        println!("parsed: {:?}", ret);
+    }
+
+    #[test]
+    fn test_parse_literal() {
+        let input = r#"
+            'c';
+            '汉';
+            "a string";
+            "汉字字符串'`🙂";
+            "string \\ \t \n \r \" with \" quote";
+            true;
+            false;
+            0;
+            100;
+            100_000_000;
+            0.0;
+            1.0;
+            1_000.000_001;
+        "#;
+
+        let inputs: Vec<&str> = input
+            .split(';')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<&str>>();
+
+        for i in inputs {
+            println!("=> {}", i);
+            let (s, ast) = parse_literal(i).unwrap();
+
+            assert_eq!(s, "");
+
+            println!("parse: {:?}", ast);
+        }
+    }
+
+    #[test]
+    fn test_parse_let_stmt() {
+        let input = r#"
+            let a = a + b * c;
+        "#;
+
+        let inputs: Vec<&str> = input
+            .split(';')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<&str>>();
+
+        for i in inputs {
+            println!("=> {}", i);
+
+            let (s, ast) = parse_let_stmt(i).unwrap();
+
+            assert_eq!(s, "");
+
+            println!("parsed: {:?}", ast);
+        }
+    }
+
+    #[test]
+    fn test_parse_binop_expr() {
+        let input = r#"
+            1 + 2*3 + 4 - 5 / 6 * 7 % 8;
+            a + b * c - (e + f) * g;
+            a.b + c * d - e.f * g + h;
+            a . b + c * d - e.f * g + h;
+            a.b ^ 3 + c * d - e.f ^ 2 * g + h;
+            -1 + 2 - -3;
+            -a + b - -c;
+            !a;
+            a + b ^ 4 + -c;
+        "#;
+
+        let inputs: Vec<&str> = input
+            .split(';')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<&str>>();
+
+        for i in inputs {
+            println!("=> {}", i);
+
+            let (s, expr) = parse_expr(i).unwrap();
+
+            assert_eq!(s, "");
+
+            println!("parsed:\n {}", expr);
+        }
+    }
+}

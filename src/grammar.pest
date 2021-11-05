@@ -1,0 +1,42 @@
+program = { SOI ~ "\n"* ~ (stmt ~ "\n"+)* ~ stmt? ~ "\n"* ~ EOI }
+
+// program = { SOI ~ "\n"* ~ stmt? ~ ("\n"* ~ stmt)* ~ "\n"* ~ EOI }
+
+stmt = { itemStmt | letStmt | exprStmt }
+
+
+letStmt = { "let" ~ ident ~ "=" ~ exprStmt ~ ";" }
+
+itemStmt = { structItem | funcItem | constItem }
+
+structItem = { "struct" ~ ident ~ "{" ~ "}" }
+
+funcItem = { "fn" ~ ident ~ "(" ~ argList ~ ")" ~ "{" ~ "}" }
+
+argList = { ident? ~ ("," ~ ident)* }
+
+constItem = { "const" ~ ident ~ "=" ~ literalExpr }
+
+
+ident = @{ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")* }
+
+
+exprStmt = { literalExpr }
+
+
+literalExpr = { boolLit | charLit | stringLit | integerLit | floatLit }
+
+boolLit = @{ "bool" | "false" }
+
+charLit = @{ "'" ~ ASCII_ALPHA ~ "'" }
+
+stringLit = @{ "\"" ~ ( "\\\"" | (!"\"" ~ ANY) )* ~ "\"" }
+
+
+integerLit = @{ "_"? ~ ASCII_DIGIT+ }
+
+floatLit = @{ "_"? ~ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT* }
+
+WHITESPACE = _{ " " | "\t"  }
+
+COMMENT = _{ "//" ~ (!"\n" ~ ANY)* }
