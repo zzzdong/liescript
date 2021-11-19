@@ -4,16 +4,15 @@ use nom::{
     character::complete::{
         alpha1, alphanumeric1, anychar, char, multispace0, multispace1, one_of, space0, space1,
     },
-    combinator::{map_res, opt, recognize, value},
+    combinator::{cut, map_res, opt, recognize, value},
     error::ParseError,
-    multi::{many0, many1},
+    multi::{many0, many1, separated_list0},
     sequence::{delimited, pair, preceded, separated_pair, terminated, tuple},
     IResult,
 };
 use pest_derive::Parser;
 
 use crate::ast::*;
-use crate::token::*;
 
 #[derive(Parser)]
 #[grammar = "grammar.pest"]
@@ -22,10 +21,10 @@ struct PestParser;
 struct LieParse {}
 
 pub fn parse_let_stmt(input: &str) -> IResult<&str, Ast> {
-    let (input, _) = tag("let")(input)?;
+    let (input, _) = tuple((tag("let"), multispace1))(input)?;
 
     let (input, (ident, expr)) = separated_pair(
-        preceded(multispace1, parse_identifier),
+        parse_identifier,
         delimited(multispace0, tag("="), multispace0),
         parse_expr,
     )(input)?;
@@ -84,8 +83,6 @@ fn dot(i: &str) -> IResult<&str, Expr> {
         })
     }
 
-    let a = -1 + -2 + 3 - 4;
-
     Ok((i, lhs))
 }
 
@@ -132,7 +129,7 @@ fn term(i: &str) -> IResult<&str, Expr> {
     Ok((i, lhs))
 }
 
-fn parse_expr(i: &str) -> IResult<&str, Expr> {
+fn parse_op_expr(i: &str) -> IResult<&str, Expr> {
     let (i, init) = term(i)?;
 
     let (i, rest) = many0(pair(
@@ -156,9 +153,49 @@ fn parse_expr(i: &str) -> IResult<&str, Expr> {
     Ok((i, lhs))
 }
 
-// pub fn parse_expr(input: &str) -> IResult<&str, Expr> {
-//     alt((parse_literal_expr, parse_binop_expr))(input)
+fn parse_funcall_expr(i: &str) -> IResult<&str, Expr> {
+    let (i, (name, params)) = separated_pair(parse_ident_expr, multispace0, parse_params)(i)?;
+
+    let funccall = FuncCallExpr {
+        name: Box::new(name),
+        params: params,
+    };
+
+    Ok((i, Expr::FuncCall(funccall)))
+}
+
+fn parse_params(i: &str) -> IResult<&str, Vec<Expr>> {
+    preceded(
+        char('('),
+        cut(terminated(
+            separated_list0(preceded(multispace0, char(',')), parse_expr),
+            preceded(multispace0, char(')')),
+        )),
+    )(i)
+}
+
+fn parse_if_expr(i: &str) -> IResult<&str, Expr> {
+    let (i, (name, params)) = separated_pair(parse_ident_expr, multispace0, parse_params)(i)?;
+
+    let funccall = FuncCallExpr {
+        name: Box::new(name),
+        params: params,
+    };
+
+    Ok((i, Expr::FuncCall(funccall)))
+}
+
+// fn parse_block(i: &str) -> IResult<&str, Expr> {
+//     delimited(
+//         tuple((char('('), multispace0)),
+//         second,
+//         tuple((multispace0, char(')'))),
+//     )
 // }
+
+fn parse_expr(i: &str) -> IResult<&str, Expr> {
+    alt((parse_funcall_expr, parse_op_expr))(i)
+}
 
 fn parse_binop_expr(input: &str) -> IResult<&str, Expr> {
     let (input, lhs) = parse_expr(input)?;
@@ -446,6 +483,8 @@ mod test {
             -a + b - -c;
             !a;
             a + b ^ 4 + -c;
+            a+b-c-d-e-f;
+            a.b-c.d*e-f*g+h;
         "#;
 
         let inputs: Vec<&str> = input
@@ -463,5 +502,52 @@ mod test {
 
             println!("parsed:\n {}", expr);
         }
+    }
+
+    #[test]
+    fn test_parse_funccall_expr() {
+        let input = r#"
+            -a.b + c;
+            hello();
+            hello(a);
+            hello(a, b, c);
+            hello(a, b+c, d-e);
+            hello(world("what" + "?"));
+        "#;
+
+        let inputs: Vec<&str> = input
+            .split(';')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<&str>>();
+
+        for i in inputs {
+            println!("=> {}", i);
+
+            let (s, expr) = parse_expr(i).unwrap();
+
+            assert_eq!(s, "");
+
+            println!("parsed:\n {}", expr);
+        }
+    }
+
+    #[test]
+    fn test_parse_if_expr() {
+        let input = r#"
+            if a > b {
+                let c = a;
+                a = b;
+                b = c;
+            }
+        "#;
+
+        println!("=> {}", input);
+
+        let (s, expr) = parse_expr(input).unwrap();
+
+        assert_eq!(s, "");
+
+        println!("parsed:\n {}", expr);
     }
 }
