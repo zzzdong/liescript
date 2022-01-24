@@ -1,12 +1,12 @@
 mod ast;
 mod bytecode;
+mod error;
 mod instructions;
+mod parser;
+mod token;
+mod tokenizer;
 mod value;
 mod vm;
-mod parser;
-mod tokenizer;
-mod token;
-
 
 #[cfg(test)]
 mod tests {

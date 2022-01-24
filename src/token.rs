@@ -1,5 +1,7 @@
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Token {
+    Eof,
+    Whitespace(String),
     Ident(String),
     BoolLit(bool),
     CharLit(char),
@@ -9,12 +11,27 @@ pub enum Token {
     Comment(String),
     Keywrod(Keyword),
     Delimiter(Delimiter),
-    Operator(Operator),
+    Punctuation(Punctuation),
     Unknown(String),
-    Error(String)
+    Error(String),
 }
 
-#[derive(Debug)]
+impl Token {
+    pub fn ident(ident: impl ToString) -> Token {
+        Token::Ident(ident.to_string())
+    }
+    pub fn whitespace(ws: impl ToString) -> Token {
+        Token::Whitespace(ws.to_string())
+    }
+    pub fn int(i: i64) -> Token {
+        Token::IntegerLit(i)
+    }
+    pub fn float(f: f64) -> Token {
+        Token::FloatLit(f)
+    }
+}
+
+#[derive(Debug, PartialEq)]
 pub enum Keyword {
     As,
     Break,
@@ -52,41 +69,61 @@ pub enum Keyword {
     Async,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Delimiter {
-    Comman,    // ,
-    Semicolon, // ;
-    Dot,       // .
-    Assign,    // =
-    Reture,    // ->
-    LParen,    // (
-    RParen,    // )
-    LSquare,   // [
-    RSquare,   // ]
-    LBracket,  // {
-    RBracker,  // }
+    LParen,   // (
+    RParen,   // )
+    LSquare,  // [
+    RSquare,  // ]
+    LBracket, // {
+    RBracker, // }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum Operator {
-    Not,      // !
-    Question, // ?
-    Plus,     // +
-    Minus,    // -
-    Mul,      // *
-    Div,      // /
-    Mod,      // %
-    Pow,      // ^
-    LShift,   // <<
-    RShift,   // >>
-    BitOr,    // |
-    BitAnd,   // &
-    And,      // &&
-    Or,       // ||
-    Eq,       // ==
-    NotEq,    // !=
-    Lt,       // <
-    LtE,      // <=
-    Gt,       // >
-    GtE,      // >=
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Punctuation {
+    Plus,       // +
+    Minus,      // -
+    Star,       // *
+    Slash,      // /
+    Percent,    // %
+    Caret,      // ^
+    Not,        // !
+    And,        // &
+    Or,         // |
+    AndAnd,     // &&
+    OrOr,       // ||
+    LShift,     // <<
+    RShift,     // >>
+    PlusEq,     // +=
+    MinusEq,    // -=
+    StarEq,     // *=
+    SlashEq,    // /=
+    PercentEq,  // %=
+    CaretEq,    // ^=
+    AndEq,      // &=
+    OrEq,       // |=
+    ShlEq,      // <<=
+    ShrEq,      // >>=
+    Eq,         // =
+    EqEq,       // ==
+    NotEq,      // !=
+    Lt,         // <
+    LtE,        // <=
+    Gt,         // >
+    GtE,        // >=
+    At,         // @
+    Underscore, // _
+    Dot,        // .
+    DotDot,     // ..
+    DotDotDot,  // ...
+    DotDotEq,   // ..=
+    Comman,     // ,
+    Semicolon,  // ;
+    Colon,      // :
+    PathSep,    // ::
+    RArrow,     // ->
+    FatArrow,   // =>
+    Pound,      // #
+    Dollar,     // $
+    Question,   // ?
 }

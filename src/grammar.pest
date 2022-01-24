@@ -1,42 +1,54 @@
-program = { SOI ~ "\n"* ~ (stmt ~ "\n"+)* ~ stmt? ~ "\n"* ~ EOI }
-
-// program = { SOI ~ "\n"* ~ stmt? ~ ("\n"* ~ stmt)* ~ "\n"* ~ EOI }
+program = { SOI ~ "\n"* ~ (stmt)* ~ stmt? ~ "\n"* ~ EOI }
 
 stmt = { itemStmt | letStmt | exprStmt }
-
 
 letStmt = { "let" ~ ident ~ "=" ~ exprStmt ~ ";" }
 
 itemStmt = { structItem | funcItem | constItem }
 
-structItem = { "struct" ~ ident ~ "{" ~ "}" }
+structItem = { "struct" ~ ident ~ "{" ~ fieldItem* ~ "}" }
 
-funcItem = { "fn" ~ ident ~ "(" ~ argList ~ ")" ~ "{" ~ "}" }
+fieldItem = { ident ~ ":" ~ typeDecl ~ "," }
 
-argList = { ident? ~ ("," ~ ident)* }
+funcItem = { "fn" ~ ident ~ "(" ~ argList ~ ")" ~ ("->" ~ typeDecl )? ~ "{" ~ "}" }
+
+argList = { argItem? ~ ("," ~ argItem)* }
+
+argItem = { ident ~ ":" ~ typeDecl }
 
 constItem = { "const" ~ ident ~ "=" ~ literalExpr }
 
-
-ident = @{ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")* }
-
-
 exprStmt = { literalExpr }
 
+literalExpr = { boolLit | charLit | stringLit | floatLit | integerLit }
 
-literalExpr = { boolLit | charLit | stringLit | integerLit | floatLit }
+boolLit = @{ "true" | "false" }
 
-boolLit = @{ "bool" | "false" }
-
-charLit = @{ "'" ~ ASCII_ALPHA ~ "'" }
-
-stringLit = @{ "\"" ~ ( "\\\"" | (!"\"" ~ ANY) )* ~ "\"" }
-
+charLit = @{ "'" ~ char ~ "'" }
 
 integerLit = @{ "_"? ~ ASCII_DIGIT+ }
 
 floatLit = @{ "_"? ~ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT* }
 
-WHITESPACE = _{ " " | "\t"  }
+stringLit = @{ "\"" ~ stringInner ~ "\"" }
+
+stringInner = @{ char* }
+
+char = {
+    !("\"" | "\\") ~ ANY
+    | "\\" ~ ("\"" | "\\" | "/" | "b" | "f" | "n" | "r" | "t")
+    | "\\" ~ ("u" ~ ASCII_HEX_DIGIT{4})
+}
+
+ident = @{ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")* }
+
+
+
+typeDecl = { builtinType | ident }
+
+builtinType = { "bool" | "byte" | "char" | "int" | "float" | "string" }
+
+
+WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
 
 COMMENT = _{ "//" ~ (!"\n" ~ ANY)* }
