@@ -67,7 +67,7 @@ impl Vm {
     //     while let Some(instr) = instructions.get(self.pc) {
     //         match instr {
     //             Instruction::LoadConst(name) => {
-                    
+
     //             }
     //             Instruction::LookUp(name) => {
 

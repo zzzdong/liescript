@@ -1,22 +1,78 @@
-use pest_derive::Parser;
+use pest::{
+    iterators::{Pair, Pairs},
+    Parser, Span,
+};
 
 use crate::ast::*;
 
-#[derive(Parser)]
+#[derive(pest_derive::Parser)]
 #[grammar = "grammar.pest"]
 struct PestParser;
 
+impl PestParser {
+    pub fn parse_input(input: &str) -> anyhow::Result<()> {
+        let mut rules = PestParser::parse(Rule::program, input).unwrap();
+        let rules = rules.next().unwrap();
+        for rule in rules.into_inner() {
+            println!("{:?}", rule);
+        }
+
+        Ok(())
+    }
+}
+
+fn span_into_str(span: Span) -> &str {
+    span.as_str()
+}
+
+pub enum ConversionError {
+    NoMatch,
+    FatalError(Box<dyn std::error::Error + Send + Sync + 'static>),
+}
+
+// pub(crate) trait FromPest<'p>: Sized {
+//     fn from_pest(p: &mut Pairs<'p, Rule>) -> Result<Self, ConversionError>;
+// }
+
+// impl<'p> FromPest<'p> for PrefixOp {
+//     fn from_pest(p: &mut Pairs<'p, Rule>) -> Result<Self, ConversionError> {
+//         let mut clone = p.clone();
+//         let pair = clone.next().ok_or(ConversionError::NoMatch)?;
+
+//         if pair.as_rule() == Rule::prefixOp {
+//             let span = pair.as_span();
+//             let mut inner = pair.into_inner();
+//             let inner = &mut inner;
+
+//         }
+
+//         Err(ConversionError::NoMatch)
+//     }
+// }
 
 #[cfg(test)]
 mod test {
     use std::{io::BufRead, str::Chars};
 
     use super::*;
-    use pest::Parser;
+    use pest::{
+        iterators::{Pair, Pairs},
+        Parser,
+    };
 
     #[test]
     fn test() {
         let program = r#"
+                        -1;
+                        a*-a;
+                        a+-a;
+                        a+b.c*d/e-f.g;
+                        a+b;
+                        a+b+c;
+                        a+b-c;
+                        a+b.c;
+                        a+b*c;
+                        a+b*c/d-e;
                         let a = 0;
                         let a = 0.0;
                         let a = 100;
@@ -35,15 +91,11 @@ mod test {
                         // this is comment
                         "#;
 
-        let ret = PestParser::parse(Rule::program, program).unwrap();
+        PestParser::parse_input(program).unwrap();
 
-        println!("parsed: {:?}", ret);
+        // println!("parsed: {:?}", rules);
     }
-
-    
 }
-
-
 
 mod nom_parser {
 
@@ -576,4 +628,3 @@ mod nom_parser {
         println!("parsed:\n {}", expr);
     }
 }
-

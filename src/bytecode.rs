@@ -1,4 +1,3 @@
-
 ///    +--------+--------+----+----+~~~~+
 ///    | OPCODE |  FLAG  |RSRC|RTRG|IMM |
 ///    +--------+--------+---------+~~~~+
@@ -12,7 +11,6 @@ pub struct Opcode {
     pub src: u8,
     pub imm: u64,
 }
-
 
 pub enum Op {
     Add,
@@ -28,7 +26,6 @@ pub enum Op {
     Xor,
     Mov,
 }
-
 
 pub enum Mode {
     Register,

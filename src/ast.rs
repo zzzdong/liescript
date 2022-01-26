@@ -28,7 +28,7 @@ impl Expr {
     fn traval_expr(expr: &Expr, mut level: usize, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match expr {
             Expr::BinOp(BinOpExpr { op, lhs, rhs }) => {
-                writeln!(f, "{:indent$}{:?}", "", op, indent=level * LEVEL_INDENT)?;
+                writeln!(f, "{:indent$}{:?}", "", op, indent = level * LEVEL_INDENT)?;
 
                 level += 1;
 
@@ -37,29 +37,40 @@ impl Expr {
                 Self::traval_expr(rhs, level, f)?;
             }
             Expr::Prefix(PrefixOpExpr { op, rhs }) => {
-                writeln!(f, "{:indent$}{:?}", "", op, indent=level * LEVEL_INDENT)?;
+                writeln!(f, "{:indent$}{:?}", "", op, indent = level * LEVEL_INDENT)?;
 
                 level += 1;
 
                 Self::traval_expr(rhs, level, f)?;
             }
-            Expr::FuncCall(FuncCallExpr{name, params}) => {
-                writeln!(f, "{:indent$}FunctionCall", "", indent=level * LEVEL_INDENT)?;
+            Expr::FuncCall(FuncCallExpr { name, params }) => {
+                writeln!(
+                    f,
+                    "{:indent$}FunctionCall",
+                    "",
+                    indent = level * LEVEL_INDENT
+                )?;
                 level += 1;
-                writeln!(f, "{:indent$}Name", "", indent=level * LEVEL_INDENT)?;
+                writeln!(f, "{:indent$}Name", "", indent = level * LEVEL_INDENT)?;
                 level += 1;
                 Self::traval_expr(name, level, f)?;
-                writeln!(f, "{:indent$}Params", "", indent=level * LEVEL_INDENT)?;
+                writeln!(f, "{:indent$}Params", "", indent = level * LEVEL_INDENT)?;
                 level += 1;
                 for param in params {
                     Self::traval_expr(param, level, f)?;
                 }
             }
             Expr::Literal(lit) => {
-                writeln!(f, "{:indent$}{:?}", "", lit, indent=level * LEVEL_INDENT)?;
+                writeln!(f, "{:indent$}{:?}", "", lit, indent = level * LEVEL_INDENT)?;
             }
             Expr::Ident(ident) => {
-                writeln!(f, "{:indent$}{:?}", "", ident, indent=level * LEVEL_INDENT)?;
+                writeln!(
+                    f,
+                    "{:indent$}{:?}",
+                    "",
+                    ident,
+                    indent = level * LEVEL_INDENT
+                )?;
             }
             _ => {}
         }
@@ -74,7 +85,6 @@ impl fmt::Display for Expr {
     }
 }
 
-
 fn write_ident(level: usize, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     for _i in 0..level * LEVEL_INDENT {
         write!(f, "")?;
@@ -85,9 +95,8 @@ fn write_ident(level: usize, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 
 #[derive(Debug, Clone)]
 pub struct BlockExpr {
-    pub block: Vec<Ast>
+    pub block: Vec<Ast>,
 }
-
 
 #[derive(Debug, Clone)]
 pub struct FuncCallExpr {
@@ -111,9 +120,13 @@ pub struct BinOpExpr {
 #[derive(Debug, Clone)]
 pub enum LiteralExpr {
     Char(char),
+
     Bool(bool),
+
     Integer(i64),
+
     Float(f64),
+
     String(String),
 }
 

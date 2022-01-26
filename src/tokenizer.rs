@@ -1,3 +1,5 @@
+use std::ops::RangeBounds;
+use std::str::CharIndices;
 use std::{iter::Peekable, str::Chars};
 
 use nom::{
@@ -6,61 +8,55 @@ use nom::{
 };
 
 use crate::error::{Location, ParserError};
-use crate::token::{Delimiter, Punctuation, Token};
+use crate::token::{Delimiter, Keyword, Operator, Token};
 
-struct Tokenizer {
-    input: Vec<char>,
-    pos: usize,
+struct Tokenizer<'i> {
+    input: Peekable<Chars<'i>>,
     filename: String,
 }
 
-impl Tokenizer {
-    pub fn new(filename: &str, input: &str) -> Self {
-        let input = input.chars().collect();
+impl<'i> Tokenizer<'i> {
+    pub fn new(filename: &str, input: &'i str) -> Self {
+        let input = input.chars().peekable();
 
         Tokenizer {
             input,
-            pos: 0,
             filename: filename.to_string(),
         }
     }
 
     fn location(&self, pos: usize) -> Location {
-        let mut line = 0;
-        let mut column = 0;
+        let mut line = 1;
+        let mut column = 1;
 
-        for i in 0..=pos {
-            if self.input[i] == '\n' {
-                line += 1;
-                column = 0;
-            }
+        // for i in 0..=pos {
+        //     if self.input[i] == '\n' {
+        //         line += 1;
+        //         column = 1;
+        //     }
 
-            column += 1;
-        }
+        //     column += 1;
+        // }
 
         Location::new(&self.filename, line, column)
     }
 
-    pub fn next(&mut self) -> Result<Token, ParserError> {
+    pub fn next_token(&mut self) -> Result<Token, ParserError> {
         while let Some(c) = self.peek() {
-            if c.is_ascii_whitespace() {
-                return self.eat_whitespace();
-            } else if c.is_ascii_alphabetic() || *c == '_' {
-                return self.eat_ident();
-            } else if c.is_ascii_digit() {
-                return self.eat_number();
-            }
-
             match c {
-                ' ' | '\t' | '\n' | '\r' => return self.eat_whitespace(),
+                '\t' | '\n' | '\x0C' | '\r' | ' ' => return self.eat_whitespace(),
                 '_' | 'a'..='z' | 'A'..='Z' => return self.eat_ident(),
                 '0'..='9' => return self.eat_number(),
-                '(' | ')' | '[' | ']' | '{' | '}' => {
-                    return Ok(Token::Delimiter(self.eat_delimiter(*c)))
-                }
-                // '"' => return self.eat_qoute(),
+                '"' => return self.eat_string(),
                 _ => {
-                    dbg!(c, self.pos);
+                    if Delimiter::CHARS.contains(&c) {
+                        return self.eat_delimiter();
+                    }
+                    if let Some(op) = self.try_eat_operator() {
+                        return Ok(Token::Operator(op));
+                    }
+
+                    dbg!(c);
                     unreachable!()
                 }
             }
@@ -69,89 +65,36 @@ impl Tokenizer {
         Ok(Token::Eof)
     }
 
-    fn starts_with(&self, p: &str) -> Option<usize> {
-        let mut count = 0;
-
-        for (i, c) in p.chars().enumerate() {
-            match self.input.get(self.pos + i) {
-                Some(ch) => {
-                    if *ch == c {
-                        count += 1;
-                    } else {
-                        return None;
-                    }
-                }
-                None => return None,
-            }
-        }
-
-        Some(count)
-    }
-
-    fn has_at_least(&self, n: usize) -> bool {
-        self.pos + n < self.input.len()
-    }
-
-    pub fn rest(&self) -> String {
-        self.input[self.pos..].into_iter().collect()
-    }
-
-    pub fn pos(&self) -> usize {
-        self.pos
-    }
-
-    fn at(&self, pos: usize) -> char {
-        self.input[pos]
-    }
-
-    fn get(&self, range: std::ops::Range<usize>) -> String {
-        self.input[range].into_iter().collect()
-    }
-
     fn len(&self) -> usize {
-        self.input.len()
-    }
-
-    fn advance(&mut self, n: usize) -> usize {
-        self.pos += n;
-        self.pos
-    }
-
-    fn reset(&mut self, pos: usize) {
-        self.pos = pos;
+        self.input.clone().count()
     }
 
     pub fn is_eof(&mut self) -> bool {
-        self.pos == self.input.len()
+        self.input.peek().is_none()
     }
 
-    fn peek(&self) -> Option<&char> {
-        self.input.get(self.pos)
+    fn next(&mut self) -> Option<char> {
+        self.input.next()
     }
 
-    fn peekn(&self, n: usize) -> Option<String> {
-        self.input
-            .get(self.pos..self.pos + n)
-            .map(|items| items.iter().collect())
+    fn peek(&mut self) -> Option<char> {
+        self.input.peek().cloned()
     }
 
     fn eat_while<P>(&mut self, mut predicate: P) -> String
     where
         P: FnMut(char) -> bool,
     {
-        let start = self.pos;
-        let mut end = self.input.len();
+        let mut ret = String::new();
 
-        for i in self.pos..self.input.len() {
-            if !predicate(self.at(i)) {
-                end = i;
-                break;
+        while let Some(ch) = self.peek() {
+            if !predicate(ch) {
+                return ret;
             }
+            ret.push(self.input.next().unwrap());
         }
 
-        self.pos = end;
-
-        self.get(start..end)
+        ret
     }
 
     pub fn eat_whitespace(&mut self) -> Result<Token, ParserError> {
@@ -163,13 +106,18 @@ impl Tokenizer {
     pub fn eat_ident(&mut self) -> Result<Token, ParserError> {
         let got = self.eat_while(|c| c.is_ascii_alphanumeric() || c == '_');
 
+        if Keyword::STRS.contains(&&got.as_str()) {
+            let kw = Keyword::from_str(got.as_str());
+            return Ok(Token::Keywrod(kw));
+        }
+
         // TODO: keyword
 
         Ok(Token::Ident(got))
     }
 
     fn eat_number(&mut self) -> Result<Token, ParserError> {
-        let start = self.pos;
+        let start = 0;
         let mut is_float = false;
 
         let num = self.eat_while(|c| {
@@ -198,103 +146,90 @@ impl Tokenizer {
         }
     }
 
-    // fn eat_qoute(&mut self) -> Result<Token, ParserError> {
-    //     let start = self.pos;
-    // }
-
-    fn in_quotes(&mut self, quote: char) -> Result<String, ParserError> {
+    fn eat_string(&mut self) -> Result<Token, ParserError> {
         let mut ret = String::new();
 
-        let start = self.pos();
-        let mut pos = self.pos();
+        self.next().unwrap();
 
-        loop {
-            match self.at(pos) {
+        let mut is_backslash_previous = false;
+
+        while let Some(c) = self.next() {
+            match c {
+                '"' => {
+                    return Ok(Token::StringLit(ret));
+                }
                 '\\' => {
-                    if pos + 1 < self.len() {
-                        pos += 1;
-                        let ch = self.at(pos);
-                        let got = match ch {
-                            '\\' => '\\',
+                    if is_backslash_previous {
+                        ret.push(c);
+                        is_backslash_previous = false;
+                    } else {
+                        is_backslash_previous = true;
+                    }
+                }
+                _ => {
+                    if is_backslash_previous {
+                        let ch = match c {
                             'n' => '\n',
                             'r' => '\r',
                             't' => '\t',
-                            ch => {
-                                if quote == ch {
-                                    ch
-                                } else {
-                                    ret.push('\\');
-                                    ch
-                                }
+                            '"' => '"',
+                            _ => {
+                                let location = self.location(0);
+                                return Err(ParserError::new(
+                                    location,
+                                    "unknown char after escape",
+                                ));
                             }
                         };
+
+                        is_backslash_previous = true;
+                        ret.push(ch);
                     } else {
-                        let location = self.location(pos);
-                        return Err(ParserError::new(location, "incomplete string"))
-                    }
-                }
-                c => {
-                    if c == quote {
-                        self.reset(pos);
-                        return Ok(self.get(start..pos))
+                        ret.push(c);
                     }
                 }
             }
         }
+
+        Ok(Token::Eof)
     }
 
-    fn eat_delimiter(&mut self, c: char) -> Delimiter {
-        match c {
-            '(' => Delimiter::LParen,
-            ')' => Delimiter::RParen,
-            '[' => Delimiter::LBracket,
-            ']' => Delimiter::RBracker,
-            '{' => Delimiter::LBracket,
-            '}' => Delimiter::RBracker,
-            _ => unreachable!(),
+    fn eat_delimiter(&mut self) -> Result<Token, ParserError> {
+        let ch = self.next().unwrap();
+
+        let delimiter = Delimiter::from_char(ch);
+
+        Ok(Token::Delimiter(delimiter))
+    }
+
+    fn try_eat_operator(&mut self) -> Option<Operator> {
+        let mut input = self.input.clone();
+
+        let first = input.next().unwrap();
+        match input.peek() {
+            Some(second) => {
+                let got: String = [first, *second].iter().collect();
+                let got = got.as_str();
+                if Operator::STRS.contains(&&got) {
+                    self.input.next();
+                    self.input.next();
+                    return Some(Operator::from_str(got));
+                }
+            }
+            None => {}
         }
+
+        let got: String = [first].iter().collect();
+        let got = got.as_str();
+        if Operator::STRS.contains(&&got) {
+            self.input.next();
+            return Some(Operator::from_str(got));
+        }
+
+        // assert!(ch == ',');
+
+        None
     }
-
-    // fn parse_delimiter(&self) -> IResult<&'s str, Delimiter> {
-    //     alt((
-    //         value(Delimiter::Comman, tag(",")),
-    //         value(Delimiter::Semicolon, tag(";")),
-    //         value(Delimiter::Dot, tag(".")),
-    //         value(Delimiter::Assign, tag("=")),
-    //         value(Delimiter::Reture, tag("->")),
-    //         value(Delimiter::LParen, tag("(")),
-    //         value(Delimiter::RParen, tag(")")),
-    //         value(Delimiter::LSquare, tag("[")),
-    //         value(Delimiter::RSquare, tag("]")),
-    //         value(Delimiter::LBracket, tag("{")),
-    //         value(Delimiter::RBracker, tag("}")),
-    //     ))(self.pos)
-    // }
-
-    // fn parse_op(&self) -> IResult<&'s str, Operator> {
-    //     alt((
-    //         value(Operator::Not, tag("!")),
-    //         value(Operator::Question, tag("?")),
-    //         value(Operator::Plus, tag("+")),
-    //         value(Operator::Minus, tag("-")),
-    //         value(Operator::Mul, tag("*")),
-    //         value(Operator::Div, tag("/")),
-    //         value(Operator::Mod, tag("%")),
-    //         value(Operator::Pow, tag("^")),
-    //         value(Operator::LShift, tag("<<")),
-    //         value(Operator::RShift, tag(">>")),
-    //         value(Operator::BitOr, tag("|")),
-    //         value(Operator::BitAnd, tag("&")),
-    //         value(Operator::And, tag("&&")),
-    //         value(Operator::Or, tag("||")),
-    //         value(Operator::Eq, tag("==")),
-    //         value(Operator::NotEq, tag("!=")),
-    //         value(Operator::Lt, tag("<")),
-    //         value(Operator::LtE, tag("<=")),
-    //         value(Operator::Gt, tag(">")),
-    //         value(Operator::GtE, tag(">=")),
-    //     ))(self.pos)
-    // }
 }
 
 #[cfg(test)]
@@ -334,13 +269,38 @@ mod test {
                 ],
             ),
             (
-                "hello 123 123.4",
+                "hello,123,123.4",
                 vec![
                     Token::ident("hello"),
-                    Token::whitespace(" "),
+                    Token::decimal(','),
                     Token::int(123),
-                    Token::whitespace(" "),
+                    Token::decimal(','),
                     Token::float(123.4),
+                ],
+            ),
+            (
+                r#"hello("hello")123"#,
+                vec![
+                    Token::ident("hello"),
+                    Token::decimal('('),
+                    Token::string("hello"),
+                    Token::decimal(')'),
+                    Token::int(123),
+                ],
+            ),
+            (
+                r#"let a=b+c*123;"#,
+                vec![
+                    Token::Keywrod(Keyword::Let),
+                    Token::whitespace(" "),
+                    Token::ident("a"),
+                    Token::Delimiter(Delimiter::Eq),
+                    Token::ident("b"),
+                    Token::Operator(Operator::Plus),
+                    Token::ident("c"),
+                    Token::Operator(Operator::Mul),
+                    Token::int(123),
+                    Token::Delimiter(Delimiter::Semicolon),
                 ],
             ),
         ];
@@ -350,7 +310,7 @@ mod test {
 
             let mut ret = Vec::new();
 
-            while let Ok(t) = tokenizer.next() {
+            while let Ok(t) = tokenizer.next_token() {
                 if t == Token::Eof {
                     break;
                 }
@@ -358,7 +318,6 @@ mod test {
                 ret.push(t);
             }
 
-            // println!("pos: >{}<", tokenizer.pos())
             assert_eq!(ret, i.1);
         }
     }
