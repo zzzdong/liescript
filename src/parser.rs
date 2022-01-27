@@ -1,68 +1,127 @@
-use pest::{
-    iterators::{Pair, Pairs},
-    Parser, Span,
-};
+use std::borrow::Cow;
 
-use crate::ast::*;
+use crate::{ast::*, token::Token, tokenizer::Tokenizer};
 
-#[derive(pest_derive::Parser)]
-#[grammar = "grammar.pest"]
-struct PestParser;
+pub struct ParseError {
+    detail: Cow<'static, str>,
+}
 
-impl PestParser {
-    pub fn parse_input(input: &str) -> anyhow::Result<()> {
-        let mut rules = PestParser::parse(Rule::program, input).unwrap();
-        let rules = rules.next().unwrap();
-        for rule in rules.into_inner() {
-            println!("{:?}", rule);
+impl ParseError {
+    pub fn new<D: Into<Cow<'static, str>>>(detail: D) -> ParseError {
+        ParseError {
+            detail: detail.into(),
         }
-
-        Ok(())
     }
 }
 
-fn span_into_str(span: Span) -> &str {
-    span.as_str()
-}
 
-pub enum ConversionError {
-    NoMatch,
-    FatalError(Box<dyn std::error::Error + Send + Sync + 'static>),
-}
-
-// pub(crate) trait FromPest<'p>: Sized {
-//     fn from_pest(p: &mut Pairs<'p, Rule>) -> Result<Self, ConversionError>;
+// macro_rules! expect_token {
+//     ($tokenizer:expr, $expect:expr) => {{
+//         match $tokenizer.next() {
+//             t @ $expect => {
+//                 t
+//             }
+//             t => {
+//                 return ParseError::new(format!("expect {:?}, but found {:?}", expect, t))
+//             }
+//         }
+//     }};
 // }
 
-// impl<'p> FromPest<'p> for PrefixOp {
-//     fn from_pest(p: &mut Pairs<'p, Rule>) -> Result<Self, ConversionError> {
-//         let mut clone = p.clone();
-//         let pair = clone.next().ok_or(ConversionError::NoMatch)?;
 
-//         if pair.as_rule() == Rule::prefixOp {
-//             let span = pair.as_span();
-//             let mut inner = pair.into_inner();
-//             let inner = &mut inner;
+// pub struct Parser {}
 
+// impl Parser {
+//     pub fn parse_str(input: &str) -> Result<Ast, ParseError> {
+//         let mut tokenizer = Tokenizer::new("", input);
+
+//         let mut ast = Ast::new();
+
+//         loop {
+//             let token = tokenizer.next_token()?;
+
+//             if token == Token::Eof {
+//                 break;
+//             }
+
+//             match token {
+//                 Token::Keywrod(crate::token::Keyword::Let) => {}
+//             }
 //         }
+//     }
 
-//         Err(ConversionError::NoMatch)
+//     fn parse_let_stmt(tokenizer: &mut Tokenizer) -> Result<LetStmt, ParseError> {
+//         let eq = Token::Delimiter(crate::token::Delimiter::Eq);
+//         let t = expect_token!(tokenizer, eq);
 //     }
 // }
 
-#[cfg(test)]
-mod test {
-    use std::{io::BufRead, str::Chars};
-
-    use super::*;
+mod pest_parser {
     use pest::{
         iterators::{Pair, Pairs},
-        Parser,
+        Parser, Span,
     };
 
-    #[test]
-    fn test() {
-        let program = r#"
+    #[derive(pest_derive::Parser)]
+    #[grammar = "grammar.pest"]
+    struct PestParser;
+
+    impl PestParser {
+        pub fn parse_input(
+            input: &str,
+        ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+            let mut rules = PestParser::parse(Rule::program, input).unwrap();
+            let rules = rules.next().unwrap();
+            for rule in rules.into_inner() {
+                println!("{:?}", rule);
+            }
+
+            Ok(())
+        }
+    }
+
+    fn span_into_str(span: Span) -> &str {
+        span.as_str()
+    }
+
+    pub enum ConversionError {
+        NoMatch,
+        FatalError(Box<dyn std::error::Error + Send + Sync + 'static>),
+    }
+
+    // pub(crate) trait FromPest<'p>: Sized {
+    //     fn from_pest(p: &mut Pairs<'p, Rule>) -> Result<Self, ConversionError>;
+    // }
+
+    // impl<'p> FromPest<'p> for PrefixOp {
+    //     fn from_pest(p: &mut Pairs<'p, Rule>) -> Result<Self, ConversionError> {
+    //         let mut clone = p.clone();
+    //         let pair = clone.next().ok_or(ConversionError::NoMatch)?;
+
+    //         if pair.as_rule() == Rule::prefixOp {
+    //             let span = pair.as_span();
+    //             let mut inner = pair.into_inner();
+    //             let inner = &mut inner;
+
+    //         }
+
+    //         Err(ConversionError::NoMatch)
+    //     }
+    // }
+
+    #[cfg(test)]
+    mod test {
+        use std::{io::BufRead, str::Chars};
+
+        use super::*;
+        use pest::{
+            iterators::{Pair, Pairs},
+            Parser,
+        };
+
+        #[test]
+        fn test() {
+            let program = r#"
                         -1;
                         a*-a;
                         a+-a;
@@ -91,9 +150,10 @@ mod test {
                         // this is comment
                         "#;
 
-        PestParser::parse_input(program).unwrap();
+            PestParser::parse_input(program).unwrap();
 
-        // println!("parsed: {:?}", rules);
+            // println!("parsed: {:?}", rules);
+        }
     }
 }
 
@@ -116,7 +176,7 @@ mod nom_parser {
 
     struct LieParse {}
 
-    pub fn parse_let_stmt(input: &str) -> IResult<&str, Ast> {
+    pub fn parse_let_stmt(input: &str) -> IResult<&str, AstNode> {
         let (input, _) = tuple((tag("let"), multispace1))(input)?;
 
         let (input, (ident, expr)) = separated_pair(
@@ -130,7 +190,7 @@ mod nom_parser {
             expr: expr,
         };
 
-        Ok((input, Ast::Let(let_stmt)))
+        Ok((input, AstNode::Let(let_stmt)))
     }
 
     fn parens(i: &str) -> IResult<&str, Expr> {

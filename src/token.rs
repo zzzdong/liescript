@@ -1,7 +1,53 @@
+use std::borrow::Cow;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Location {
+    filename: String,
+    line: usize,
+    column: usize,
+}
+
+impl Location {
+    pub fn new(filename: impl ToString, line: usize, column: usize) -> Self {
+        Location {
+            filename: filename.to_string(),
+            line,
+            column,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct TokenError {
+    location: Location,
+    detail: Option<Cow<'static, str>>,
+    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+}
+
+impl TokenError {
+    pub fn new<D: Into<Cow<'static, str>>>(location: Location, detail: D) -> TokenError {
+        TokenError {
+            location: location,
+            detail: Some(detail.into()),
+            source: None,
+        }
+    }
+
+    pub fn with_source<E: std::error::Error + Send + Sync + 'static>(mut self, source: E) -> Self {
+        self.source = Some(Box::new(source));
+        self
+    }
+}
+
+impl PartialEq for TokenError {
+    fn eq(&self, other: &Self) -> bool {
+        unreachable!()
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub enum Token {
     Eof,
-    Comma, // ,
     Whitespace(String),
     Ident(String),
     BoolLit(bool),
@@ -13,28 +59,28 @@ pub enum Token {
     Keywrod(Keyword),
     Delimiter(Delimiter),
     Operator(Operator),
-    Unknown(String),
-    Error(String),
+    Unknown(char),
+    Error(TokenError),
 }
 
 impl Token {
-    pub fn ident(ident: impl ToString) -> Token {
+    pub(crate) fn ident(ident: impl ToString) -> Token {
         Token::Ident(ident.to_string())
     }
-    pub fn whitespace(ws: impl ToString) -> Token {
+    pub(crate) fn whitespace(ws: impl ToString) -> Token {
         Token::Whitespace(ws.to_string())
     }
-    pub fn int(i: i64) -> Token {
+    pub(crate) fn int(i: i64) -> Token {
         Token::IntegerLit(i)
     }
-    pub fn float(f: f64) -> Token {
+    pub(crate) fn float(f: f64) -> Token {
         Token::FloatLit(f)
     }
-    pub fn string(s: impl ToString) -> Token {
+    pub(crate) fn string(s: impl ToString) -> Token {
         Token::StringLit(s.to_string())
     }
-    pub fn decimal(c: char) -> Token {
-        Token::Delimiter(Delimiter::from_char(c))
+    pub(crate) fn delimiter(s: &str) -> Token {
+        Token::Delimiter(Delimiter::from_str(s).unwrap())
     }
 }
 
@@ -89,7 +135,7 @@ impl Token {
 macro_rules! define_delimiters {
     (
         $(
-            $name:ident => $char:expr,
+            $name:ident => $str:expr,
         )*
     ) => {
         #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -102,21 +148,18 @@ macro_rules! define_delimiters {
                 $(Delimiter::$name,)*
             ];
 
-            pub const CHARS: &'static [char] = &[
-                $($char,)*
+            pub const STRS: &'static [&'static str] = &[
+                $($str,)*
             ];
 
             pub fn all() -> impl Iterator<Item=Delimiter> {
                 Self::ALL.iter().copied()
             }
 
-            pub fn from_char(ch: char) -> Self {
-                match ch {
-                    $($char => Delimiter::$name,)*
-                    _ => {
-                        unreachable!();
-                    }
-
+            pub fn from_str(s: &str) -> Result<Self, String> {
+                match s {
+                    $($str => Ok(Delimiter::$name),)*
+                    _ => Err(format!("unknown {} for delimiter", s))
                 }
             }
         }
@@ -124,16 +167,23 @@ macro_rules! define_delimiters {
 }
 
 define_delimiters! {
-    LParen   => '(',
-    RParen   => ')',
-    LSquare  => '[',
-    RSquare  => ']',
-    LBracket => '{',
-    RBracker => '}',
-    Comma    => ',',
-    Colon    => ':',
-    Semicolon => ';',
-    Eq       => '=',
+    PathSep   => "::",
+    RArrow    => "->",
+
+
+    LParen    => "(",
+    RParen    => ")",
+    LSquare   => "[",
+    RSquare   => "]",
+    LBracket  => "{",
+    RBracker  => "}",
+    Comma     => ",",
+    Colon     => ":",
+    Semicolon => ";",
+    Eq        => "=",
+    SQuotes   => "'",
+    DQuotes   => "\"",
+    Sharp     => "#",
 }
 
 macro_rules! define_operators {
@@ -160,13 +210,10 @@ macro_rules! define_operators {
                 Self::ALL.iter().copied()
             }
 
-            pub fn from_str(s: &str) -> Self {
+            pub fn from_str(s: &str) -> Result<Self, String> {
                 match s {
-                    $($str => Operator::$name,)*
-                    _ => {
-                        unreachable!();
-                    }
-
+                    $($str => Ok(Operator::$name),)*
+                    _ => Err(format!("unknown {} for operator", s))
                 }
             }
         }
@@ -188,6 +235,7 @@ define_operators! {
     NotEq     => "!=",
     LtE       => "<=",
     GtE       => ">=",
+    DotDot    => "..",
 
     Not       => "!",
     Question  => "?",
@@ -199,6 +247,9 @@ define_operators! {
     Pow       => "^",
     Lt        => "<",
     Gt        => ">",
+    Ref       => "&",
+    Dot       => ".",
+
 }
 
 macro_rules! define_keywords {
@@ -251,6 +302,7 @@ define_keywords! {
     Extern => "extern",
     Extends => "extends",
     False => "false",
+    Finally => "finally",
     Fn => "fn",
     For => "for",
     Impl => "impl",
@@ -268,6 +320,7 @@ define_keywords! {
     Static => "static",
     Struct => "struct",
     Super => "super",
+    Throw => "throw",
     Trait => "trait",
     Try => "try",
     Type => "type",
@@ -279,51 +332,51 @@ define_keywords! {
     Async => "async",
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Punctuation {
-    Plus,       // +
-    Minus,      // -
-    Star,       // *
-    Slash,      // /
-    Percent,    // %
-    Caret,      // ^
-    Not,        // !
-    And,        // &
-    Or,         // |
-    AndAnd,     // &&
-    OrOr,       // ||
-    LShift,     // <<
-    RShift,     // >>
-    PlusEq,     // +=
-    MinusEq,    // -=
-    StarEq,     // *=
-    SlashEq,    // /=
-    PercentEq,  // %=
-    CaretEq,    // ^=
-    AndEq,      // &=
-    OrEq,       // |=
-    ShlEq,      // <<=
-    ShrEq,      // >>=
-    Eq,         // =
-    EqEq,       // ==
-    NotEq,      // !=
-    Lt,         // <
-    LtE,        // <=
-    Gt,         // >
-    GtE,        // >=
-    At,         // @
-    Underscore, // _
-    Dot,        // .
-    DotDot,     // ..
-    DotDotDot,  // ...
-    DotDotEq,   // ..=
-    Comman,     // ,
-    Semicolon,  // ;
-    Colon,      // :
-    PathSep,    // ::
-    RArrow,     // ->
-    FatArrow,   // =>
-    Pound,      // #
-    Dollar,     // $
-    Question,   // ?
-}
+// #[derive(Debug, Clone, Copy, PartialEq)]
+// pub enum Punctuation {
+//     Plus,       // +
+//     Minus,      // -
+//     Star,       // *
+//     Slash,      // /
+//     Percent,    // %
+//     Caret,      // ^
+//     Not,        // !
+//     And,        // &
+//     Or,         // |
+//     AndAnd,     // &&
+//     OrOr,       // ||
+//     LShift,     // <<
+//     RShift,     // >>
+//     PlusEq,     // +=
+//     MinusEq,    // -=
+//     StarEq,     // *=
+//     SlashEq,    // /=
+//     PercentEq,  // %=
+//     CaretEq,    // ^=
+//     AndEq,      // &=
+//     OrEq,       // |=
+//     ShlEq,      // <<=
+//     ShrEq,      // >>=
+//     Eq,         // =
+//     EqEq,       // ==
+//     NotEq,      // !=
+//     Lt,         // <
+//     LtE,        // <=
+//     Gt,         // >
+//     GtE,        // >=
+//     At,         // @
+//     Underscore, // _
+//     Dot,        // .
+//     DotDot,     // ..
+//     DotDotDot,  // ...
+//     DotDotEq,   // ..=
+//     Comman,     // ,
+//     Semicolon,  // ;
+//     Colon,      // :
+//     PathSep,    // ::
+//     RArrow,     // ->
+//     FatArrow,   // =>
+//     Pound,      // #
+//     Dollar,     // $
+//     Question,   // ?
+// }

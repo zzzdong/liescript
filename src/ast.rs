@@ -3,7 +3,20 @@ use std::fmt;
 const LEVEL_INDENT: usize = 2;
 
 #[derive(Debug, Clone)]
-pub enum Ast {
+pub struct Ast {
+    pub children: Vec<AstNode>,
+}
+
+impl Ast {
+    pub fn new() -> Self {
+        Ast {
+            children: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum AstNode {
     Let(LetStmt),
     Expression(Expr),
 }
@@ -95,7 +108,7 @@ fn write_ident(level: usize, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 
 #[derive(Debug, Clone)]
 pub struct BlockExpr {
-    pub block: Vec<Ast>,
+    pub block: Vec<AstNode>,
 }
 
 #[derive(Debug, Clone)]
