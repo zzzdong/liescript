@@ -2,6 +2,7 @@ use std::{borrow::Cow, str::Chars};
 
 use crate::token::{Delimiter, Keyword, Location, Operator, Token, TokenError};
 
+#[derive(Clone)]
 pub struct Tokenizer<'i> {
     chars: Chars<'i>,
     input: &'i str,
@@ -40,62 +41,62 @@ impl<'i> Tokenizer<'i> {
     }
 
     pub fn next_token(&mut self) -> Token {
-        while let Some(c) = self.peek() {
-            match c {
-                '\t' | '\n' | '\x0C' | '\r' | ' ' => return self.eat_whitespace(),
-                '_' | 'a'..='z' | 'A'..='Z' => return self.eat_ident(),
-                '0'..='9' => return self.eat_number(),
-                '\'' => return self.eat_char(),
-                '"' => return self.eat_string(),
-                _ => {
-                    // try 2 byte
-                    if self.has_at_lease(2) {
-                        let pat = &self.chars.clone().as_str()[..2];
+        match self.peek() {
+            Some(c) => {
+                match c {
+                    '\t' | '\n' | '\x0C' | '\r' | ' ' => self.eat_whitespace(),
+                    '_' | 'a'..='z' | 'A'..='Z' => self.eat_ident(),
+                    '0'..='9' => self.eat_number(),
+                    '\'' => self.eat_char(),
+                    '"' => self.eat_string(),
+                    _ => {
+                        // try 2 byte
+                        if self.has_at_lease(2) {
+                            let pat = &self.chars.clone().as_str()[..2];
+                            let token = match pat {
+                                "//" => {
+                                    return self.eat_comment();
+                                }
+                                "::" | "->" => Some(Token::Delimiter(Delimiter::RArrow)),
+                                "+=" | "-=" | "*=" | "/=" | "%=" | "^=" | "<<" | ">>" | "&&"
+                                | "||" | "==" | "!=" | "<=" | ">=" | ".." => {
+                                    Operator::from_str(pat).ok().map(Token::Operator)
+                                }
+                                _ => None,
+                            };
+
+                            if let Some(t) = token {
+                                self.advance(2);
+                                return t;
+                            }
+                        }
+
+                        // try 1 byte
+                        let pat = &self.chars.clone().as_str()[..1];
                         let token = match pat {
-                            "//" => {
-                                return self.eat_comment();
+                            "(" | ")" | "[" | "]" | "{" | "}" | "," | ":" | ";" | "=" | "#" => {
+                                Delimiter::from_str(pat).ok().map(Token::Delimiter)
                             }
-                            "::" | "->" => Some(Token::Delimiter(Delimiter::RArrow)),
-                            "+=" | "-=" | "*=" | "/=" | "%=" | "^=" | "<<" | ">>" | "&&" | "||"
-                            | "==" | "!=" | "<=" | ">=" | ".." => {
-                                Operator::from_str(pat).ok().map(Token::Operator)
-                            }
+                            "!" | "?" | "+" | "-" | "*" | "/" | "%" | "^" | "<" | ">" | "&"
+                            | "." => Operator::from_str(pat).ok().map(Token::Operator),
                             _ => None,
                         };
 
                         if let Some(t) = token {
-                            self.advance(2);
+                            self.advance(1);
                             return t;
                         }
-                    }
 
-                    // try 1 byte
-                    let pat = &self.chars.clone().as_str()[..1];
-                    let token = match pat {
-                        "(" | ")" | "[" | "]" | "{" | "}" | "," | ":" | ";" | "=" | "#" => {
-                            Delimiter::from_str(pat).ok().map(Token::Delimiter)
-                        }
-                        "!" | "?" | "+" | "-" | "*" | "/" | "%" | "^" | "<" | ">" | "&" | "." => {
-                            Operator::from_str(pat).ok().map(Token::Operator)
-                        }
-                        _ => None,
-                    };
+                        dbg!(c, self.location(self.position));
 
-                    if let Some(t) = token {
                         self.advance(1);
-                        return t;
+
+                        Token::Unknown(c)
                     }
-
-                    dbg!(c, self.location(self.position));
-                    // unreachable!()
-
-                    self.advance(1);
-                    return Token::Unknown(c);
                 }
             }
+            None => Token::Eof,
         }
-
-        Token::Eof
     }
 
     fn len(&self) -> usize {
@@ -154,18 +155,15 @@ impl<'i> Tokenizer<'i> {
     pub fn eat_ident(&mut self) -> Token {
         let got = self.eat_while(|c| c.is_ascii_alphanumeric() || c == '_');
 
-        if got == "true" {
-            return Token::BoolLit(false);
-        } else if got == "false" {
-            return Token::BoolLit(false);
+        match got.as_str() {
+            "true" => Token::BoolLit(true),
+            "false" => Token::BoolLit(false),
+            kw if Keyword::STRS.contains(&kw) => {
+                let kw = Keyword::from_str(kw);
+                Token::Keywrod(kw)
+            }
+            _ => Token::Ident(got),
         }
-
-        if Keyword::STRS.contains(&&got.as_str()) {
-            let kw = Keyword::from_str(got.as_str());
-            return Token::Keywrod(kw);
-        }
-
-        Token::Ident(got)
     }
 
     fn eat_number(&mut self) -> Token {
@@ -289,8 +287,22 @@ impl<'i> Iterator for Tokenizer<'i> {
     fn next(&mut self) -> Option<Self::Item> {
         match self.next_token() {
             Token::Eof => None,
-            Token::Whitespace(_) => self.next(),
-            Token::Comment(_) => self.next(),
+            t => Some(t),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct StrippedTokenizer<'i>(Tokenizer<'i>);
+
+impl<'i> Iterator for StrippedTokenizer<'i> {
+    type Item = Token;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.0.next_token() {
+            Token::Eof => None,
+            Token::Whitespace(_) => self.0.next(),
+            Token::Comment(_) => self.0.next(),
             t => Some(t),
         }
     }

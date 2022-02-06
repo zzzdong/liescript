@@ -14,7 +14,6 @@ impl ParseError {
     }
 }
 
-
 // macro_rules! expect_token {
 //     ($tokenizer:expr, $expect:expr) => {{
 //         match $tokenizer.next() {
@@ -27,7 +26,6 @@ impl ParseError {
 //         }
 //     }};
 // }
-
 
 // pub struct Parser {}
 

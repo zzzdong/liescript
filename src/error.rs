@@ -11,5 +11,3 @@ pub struct Error {
     detail: Option<Cow<'static, str>>,
     source: Option<Box<dyn std::error::Error + Send + Sync>>,
 }
-
-
