@@ -1,7 +1,8 @@
+use std::iter::Peekable;
 use std::{borrow::Cow, convert::identity};
 
 use crate::token::{Delimiter, Keyword, Operator, Token};
-use crate::tokenizer::Tokenizer;
+use crate::tokenizer::{StrippedTokenizer, Tokenizer};
 use crate::{
     ast::{Ast, BinOpExpr, Expr, LetStmt, PrefixOpExpr},
     token::TokenKind,
@@ -20,45 +21,45 @@ impl ParseError {
     }
 }
 
-macro_rules! expect_token {
-    ($tokenizer:expr, $expect:expr) => {{
-        match $tokenizer.next() {
-            Some(t) if t == $expect => t,
-            Some(t) => {
-                return Err(ParseError::new(format!(
-                    "expect {:?}, but found {:?}",
-                    $expect, t
-                )))
-            }
-            None => {
-                return Err(ParseError::new(format!(
-                    "expect {:?}, but found EOF",
-                    $expect
-                )))
-            }
-        }
-    }};
-}
+// macro_rules! expect_token {
+//     ($tokenizer:expr, $expect:expr) => {{
+//         match $tokenizer.next() {
+//             Some(t) if t == $expect => t,
+//             Some(t) => {
+//                 return Err(ParseError::new(format!(
+//                     "expect {:?}, but found {:?}",
+//                     $expect, t
+//                 )))
+//             }
+//             None => {
+//                 return Err(ParseError::new(format!(
+//                     "expect {:?}, but found EOF",
+//                     $expect
+//                 )))
+//             }
+//         }
+//     }};
+// }
 
-macro_rules! expect_kind {
-    ($tokenizer:expr, $expect:expr) => {{
-        match $tokenizer.next() {
-            Some(t) if t.kind() == $expect => t,
-            Some(t) => {
-                return Err(ParseError::new(format!(
-                    "expect {:?}, but found {:?}",
-                    $expect, t
-                )))
-            }
-            None => {
-                return Err(ParseError::new(format!(
-                    "expect {:?}, but found EOF",
-                    $expect
-                )))
-            }
-        }
-    }};
-}
+// macro_rules! expect_kind {
+//     ($tokenizer:expr, $expect:expr) => {{
+//         match $tokenizer.next() {
+//             Some(t) if t.kind() == $expect => t,
+//             Some(t) => {
+//                 return Err(ParseError::new(format!(
+//                     "expect {:?}, but found {:?}",
+//                     $expect, t
+//                 )))
+//             }
+//             None => {
+//                 return Err(ParseError::new(format!(
+//                     "expect {:?}, but found EOF",
+//                     $expect
+//                 )))
+//             }
+//         }
+//     }};
+// }
 
 pub struct Parser {}
 
@@ -83,11 +84,11 @@ impl Parser {
         unimplemented!()
     }
 
-    fn parse_let_stmt(tokenizer: impl Iterator<Item = Token>) -> Result<LetStmt, ParseError> {
-        let eq = Token::Delimiter(crate::token::Delimiter::Eq);
-        let t = expect_token!(tokenizer, eq);
-        unimplemented!()
-    }
+    // fn parse_let_stmt(tokenizer: impl Iterator<Item = Token>) -> Result<LetStmt, ParseError> {
+    //     let eq = Token::Delimiter(crate::token::Delimiter::Eq);
+    //     let t = expect_token!(tokenizer, eq);
+    //     unimplemented!()
+    // }
 
     // 1. func call
     // 2. literal
@@ -95,20 +96,23 @@ impl Parser {
     // 4. prefix op
     // 5. bin op
     fn parse_expr(
-        mut tokenizer: impl Iterator<Item = Token>,
+        tokenizer: &mut Peekable<StrippedTokenizer>,
         prev_priority: u8,
     ) -> Result<Expr, ParseError> {
-        unimplemented!();
         let token = tokenizer.next();
 
-        let lhs = match token {
+        let mut lhs = match token {
             Some(Token::Literal(lit)) => Expr::Literal(lit),
             Some(Token::Ident(ident)) => Expr::Ident(ident),
             Some(Token::Operator(op)) => {
                 let priority = prefix_op_priority(op);
                 let rhs = match priority {
                     Some(p) => Self::parse_expr(tokenizer, p)?,
-                    None => return Err(ParseError::new(format!("unexpect prefix operator: {token:?}"))),
+                    None => {
+                        return Err(ParseError::new(format!(
+                            "unexpect prefix operator: {token:?}"
+                        )))
+                    }
                 };
                 Expr::Prefix(PrefixOpExpr {
                     op,
@@ -124,19 +128,47 @@ impl Parser {
         };
 
         loop {
-            let token = tokenizer.next();
+            let token = tokenizer.peek();
             match token {
-                Some(Token::Operator(op)) => {
-                    
+                Some(Token::Operator(op)) => match infix_op_priority(op.clone()) {
+                    Some(p) => {
+                        if prev_priority <= p {
+                            break;
+                        } else {
+                            let op = op.clone();
+                            tokenizer.next();
+
+                            let rhs = Self::parse_expr(tokenizer, p)?;
+                            lhs = Expr::BinOp(BinOpExpr {
+                                op,
+                                lhs: Box::new(lhs),
+                                rhs: Box::new(rhs),
+                            });
+                            continue;
+                        }
+                    }
+                    None => {
+                        return Err(ParseError::new(format!("unexpect infix op {op:?}")));
+                    }
+                },
+                Some(Token::Delimiter(Delimiter::LSquare))
+                | Some(Token::Delimiter(Delimiter::LParen)) => {
+                    unimplemented!();
                 }
                 Some(_) => {
-                    return Err(ParseError::new(format!("unexpect token {token:?}")));
+                    return Err(ParseError::new(format!(
+                        "unexpect token in binop expr {token:?}"
+                    )));
                 }
                 None => {
                     return Ok(lhs);
                 }
             }
+
+            break;
         }
+
+        Ok(lhs)
     }
 
     fn parse_expr2(mut tokenizer: impl Iterator<Item = Token>) -> Result<Expr, ParseError> {
@@ -224,7 +256,16 @@ impl Parser {
 
 fn prefix_op_priority(op: Operator) -> Option<u8> {
     match op {
-        Operator::And | Operator::Minus | Operator::Not => Some(10),
+        Operator::Plus | Operator::Minus | Operator::Not => Some(10),
+        _ => None,
+    }
+}
+
+fn infix_op_priority(op: Operator) -> Option<u8> {
+    match op {
+        Operator::Dot => Some(1),
+        Operator::Plus | Operator::Minus => Some(30),
+        Operator::Mul | Operator::Div | Operator::Mod => Some(10),
         _ => None,
     }
 }
@@ -289,10 +330,25 @@ mod test {
 
     #[test]
     fn test_parser_expr() {
-        let mut tokenizer = StrippedTokenizer::new(Tokenizer::new("", "a+b-c*d"));
+        let inputs = [
+            "a+b-c*d",
+            "a*b-c+d",
+            "a*b/c%d",
+            "a-b*c+d",
+            "-a*b-c+d",
 
-        let ret = Parser::parse_expr(tokenizer);
+        ];
 
-        println!("{:?}", ret);
+        for input in &inputs {
+            let tokenizer = StrippedTokenizer::new("", input);
+
+            let mut tokenizer = tokenizer.peekable();
+    
+            let ret = Parser::parse_expr(&mut tokenizer, 100).unwrap();
+    
+            println!("{}=>\n {}", input,  ret);
+        }
+
+
     }
 }
