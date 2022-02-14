@@ -1,5 +1,6 @@
 use std::{borrow::Cow, str::Chars};
 
+use crate::ast::{IdentExpr, LiteralExpr};
 use crate::token::{Delimiter, Keyword, Location, Operator, Token, TokenError};
 
 #[derive(Clone)]
@@ -156,13 +157,13 @@ impl<'i> Tokenizer<'i> {
         let got = self.eat_while(|c| c.is_ascii_alphanumeric() || c == '_');
 
         match got.as_str() {
-            "true" => Token::BoolLit(true),
-            "false" => Token::BoolLit(false),
+            "true" => Token::Literal(LiteralExpr::Bool(true)),
+            "false" => Token::Literal(LiteralExpr::Bool(false)),
             kw if Keyword::STRS.contains(&kw) => {
                 let kw = Keyword::from_str(kw);
                 Token::Keywrod(kw)
             }
-            _ => Token::Ident(got),
+            _ => Token::Ident(IdentExpr::new(got)),
         }
     }
 
@@ -198,7 +199,7 @@ impl<'i> Tokenizer<'i> {
 
     fn eat_string(&mut self) -> Token {
         match self.eat_qoutes('"') {
-            Ok(s) => Token::StringLit(s),
+            Ok(s) => Token::Literal(LiteralExpr::String(s)),
             Err(t) => t,
         }
     }
@@ -208,7 +209,7 @@ impl<'i> Tokenizer<'i> {
         match self.eat_qoutes('\'') {
             Ok(s) => {
                 if s.chars().count() == 1 {
-                    Token::CharLit(s.chars().next().unwrap())
+                    Token::Literal(LiteralExpr::Char(s.chars().next().unwrap()))
                 } else {
                     let location = self.location(pos);
                     Token::Error(TokenError::new(location, "too many char for CharLit"))
@@ -295,14 +296,27 @@ impl<'i> Iterator for Tokenizer<'i> {
 #[derive(Clone)]
 pub struct StrippedTokenizer<'i>(Tokenizer<'i>);
 
+impl<'i> StrippedTokenizer<'i> {
+    pub fn new(filename: &str, input: &'i str) -> Self {
+        StrippedTokenizer(Tokenizer::new(filename, input))
+    }
+
+
+    pub fn next_token(&mut self) -> Token {
+        match self.0.next_token() {
+            Token::Whitespace(_) => self.0.next_token(),
+            Token::Comment(_) => self.0.next_token(),
+            t => t,
+        }
+    }
+}
+
 impl<'i> Iterator for StrippedTokenizer<'i> {
     type Item = Token;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.0.next_token() {
+        match self.next_token() {
             Token::Eof => None,
-            Token::Whitespace(_) => self.0.next(),
-            Token::Comment(_) => self.0.next(),
             t => Some(t),
         }
     }

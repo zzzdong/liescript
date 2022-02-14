@@ -1,5 +1,7 @@
 use std::borrow::Cow;
 
+use crate::ast::{LiteralExpr, IdentExpr};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Location {
     filename: String,
@@ -49,12 +51,8 @@ impl PartialEq for TokenError {
 pub enum Token {
     Eof,
     Whitespace(String),
-    Ident(String),
-    BoolLit(bool),
-    CharLit(char),
-    IntegerLit(i64),
-    FloatLit(f64),
-    StringLit(String),
+    Ident(IdentExpr),
+    Literal(LiteralExpr),
     Comment(String),
     Keywrod(Keyword),
     Delimiter(Delimiter),
@@ -65,23 +63,51 @@ pub enum Token {
 
 impl Token {
     pub(crate) fn ident(ident: impl ToString) -> Token {
-        Token::Ident(ident.to_string())
+        Token::Ident(IdentExpr::new(ident))
     }
     pub(crate) fn whitespace(ws: impl ToString) -> Token {
         Token::Whitespace(ws.to_string())
     }
     pub(crate) fn int(i: i64) -> Token {
-        Token::IntegerLit(i)
+        Token::Literal(LiteralExpr::Integer(i))
     }
     pub(crate) fn float(f: f64) -> Token {
-        Token::FloatLit(f)
+        Token::Literal(LiteralExpr::Float(f))
     }
     pub(crate) fn string(s: impl ToString) -> Token {
-        Token::StringLit(s.to_string())
+        Token::Literal(LiteralExpr::String(s.to_string()))
     }
     pub(crate) fn delimiter(s: &str) -> Token {
         Token::Delimiter(Delimiter::from_str(s).unwrap())
     }
+
+    pub(crate) fn kind(&self) -> TokenKind {
+        match self {
+            &Token::Eof => TokenKind::Eof,
+            &Token::Whitespace(_) => TokenKind::Keywrod,
+            &Token::Ident(_)
+            | &Token::Literal(_) => TokenKind::Atom,
+            &Token::Comment(_) => TokenKind::Comment,
+            &Token::Keywrod(_) => TokenKind::Keywrod,
+            &Token::Delimiter(_) => TokenKind::Delimiter,
+            &Token::Operator(_) => TokenKind::Operator,
+            &Token::Unknown(_) => TokenKind::Unknown,
+            &Token::Error(_) => TokenKind::Error,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TokenKind {
+    Eof,
+    Whitespace,
+    Atom,
+    Comment,
+    Keywrod,
+    Delimiter,
+    Operator,
+    Unknown,
+    Error,
 }
 
 // #[derive(Debug, PartialEq)]
@@ -140,7 +166,7 @@ macro_rules! define_delimiters {
     ) => {
         #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
         pub enum Delimiter {
-            $($name,)*
+            $($name, )*
         }
 
         impl Delimiter {
@@ -169,7 +195,6 @@ macro_rules! define_delimiters {
 define_delimiters! {
     PathSep   => "::",
     RArrow    => "->",
-
 
     LParen    => "(",
     RParen    => ")",
@@ -249,7 +274,6 @@ define_operators! {
     Gt        => ">",
     Ref       => "&",
     Dot       => ".",
-
 }
 
 macro_rules! define_keywords {
