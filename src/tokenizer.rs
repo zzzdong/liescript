@@ -75,10 +75,10 @@ impl<'i> Tokenizer<'i> {
                         // try 1 byte
                         let pat = &self.chars.clone().as_str()[..1];
                         let token = match pat {
-                            "(" | ")" | "[" | "]" | "{" | "}" | "," | ":" | ";" | "=" | "#" => {
+                            "(" | ")" | "[" | "]" | "{" | "}" | "," | ":" | ";" | "#" => {
                                 Delimiter::from_str(pat).ok().map(Token::Delimiter)
                             }
-                            "!" | "?" | "+" | "-" | "*" | "/" | "%" | "^" | "<" | ">" | "&"
+                            "!" | "?" | "+" | "-" | "*" | "/" | "%" | "^" | "<" | ">" | "&" | "="
                             | "." => Operator::from_str(pat).ok().map(Token::Operator),
                             _ => None,
                         };
@@ -384,7 +384,7 @@ mod test {
                     Token::Keywrod(Keyword::Let),
                     Token::whitespace(" "),
                     Token::ident("a"),
-                    Token::Delimiter(Delimiter::Eq),
+                    Token::Operator(Operator::Assign),
                     Token::ident("b"),
                     Token::Operator(Operator::Plus),
                     Token::ident("c"),

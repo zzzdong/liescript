@@ -240,32 +240,27 @@ impl Parser {
     }
 }
 
-/// priority
-/// | Operate | Priority |
-/// |---------|---------|
-/// | . [] () |   1   |
-/// | ! + -   |  10   |
-/// | * / %   |  20   |
-/// |   + -   |  30   |
-///
-///
-///
-///
-///
-///
+/// https://doc.rust-lang.org/reference/expressions.html#expression-precedence
 
 fn prefix_op_priority(op: Operator) -> Option<u8> {
     match op {
-        Operator::Plus | Operator::Minus | Operator::Not => Some(10),
+        Operator::Plus | Operator::Minus | Operator::Not => Some(90),
         _ => None,
     }
 }
 
 fn infix_op_priority(op: Operator) -> Option<u8> {
     match op {
-        Operator::Dot => Some(1),
-        Operator::Plus | Operator::Minus => Some(30),
-        Operator::Mul | Operator::Div | Operator::Mod => Some(10),
+        Operator::Assign => Some(10),
+        Operator::DotDot => Some(20),
+        Operator::Or => Some(30),
+        Operator::And => Some(31),
+        Operator::Eq | Operator::NotEq 
+        | Operator::Lt | Operator::Gt 
+        |Operator::LtE | Operator::GtE  => Some(40),
+        // bit op (| ^ & << >>) 50
+        Operator::Plus | Operator::Minus => Some(60),
+        Operator::Mul | Operator::Div | Operator::Mod => Some(70),
         _ => None,
     }
 }
@@ -344,7 +339,7 @@ mod test {
 
             let mut tokenizer = tokenizer.peekable();
     
-            let ret = Parser::parse_expr(&mut tokenizer, 100).unwrap();
+            let ret = Parser::parse_expr(&mut tokenizer, 0).unwrap();
     
             println!("{}=>\n {}", input,  ret);
         }
