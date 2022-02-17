@@ -1,8 +1,8 @@
 use std::borrow::Cow;
 use std::iter::Peekable;
 
-use crate::ast::ast::{Ast, BinOpExpr, Expr, PrefixOpExpr};
-use crate::ast::op::{BinOp, PostfixOp, PrefixOp, LogOp, BitOp, NumOp};
+use crate::ast::ast::{Ast, BinOpExpr, Expr, IndexExpr, PrefixOpExpr, FuncCallExpr};
+use crate::ast::op::{BinOp, BitOp, LogOp, NumOp, PostfixOp, PrefixOp};
 use crate::ast::Punctuation;
 use crate::token::Token;
 use crate::tokenizer::Tokenizer;
@@ -87,12 +87,36 @@ impl Parser {
 
         loop {
             let token = tokenizer.peek();
+            
             match token {
-                Some(Token::Punctuation(Punctuation::LSquare))
-                | Some(Token::Punctuation(Punctuation::LParen)) => {
-                    // TODO: index op ("[")
+                Some(Token::Punctuation(Punctuation::LSquare)) => {
+                    tokenizer.next();
+                    let rhs = Self::parse_expr(tokenizer, 0)?;
+                    assert_eq!(
+                        tokenizer.next(),
+                        Some(Token::Punctuation(Punctuation::RSquare))
+                    );
+                    lhs = Expr::Index(IndexExpr {
+                        lhs: Box::new(lhs),
+                        rhs: Box::new(rhs),
+                    });
+                    continue;
+                }
+
+                Some(Token::Punctuation(Punctuation::LParen)) => {
                     // TODO: func call ("(")
-                    unimplemented!();
+                    let args = Self::parse_func_call_args(tokenizer)?;
+                    println!("args: {args:?}");
+                    lhs = Expr::FuncCall(FuncCallExpr{
+                        name: Box::new(lhs),
+                        params: args,
+                    });
+                    continue;
+                }
+                Some(Token::Punctuation(Punctuation::RSquare)) 
+                | Some(Token::Punctuation(Punctuation::Comma)) 
+                | Some(Token::Punctuation(Punctuation::Semicolon)) => {
+                    break;
                 }
                 Some(Token::Punctuation(op)) => {
                     let op = BinOp::from_punctuation(*op).map_err(|_| {
@@ -130,6 +154,46 @@ impl Parser {
 
         Ok(lhs)
     }
+
+    fn parse_func_call_args(
+        tokenizer: &mut Peekable<impl Iterator<Item = Token>>,
+    ) -> Result<Vec<Expr>, ParseError> {
+        let mut args = Vec::new();
+
+        tokenizer.next(); // eat "("
+
+        loop {
+            let arg = Self::parse_expr(tokenizer, 0)?;
+
+            args.push(arg);
+
+            let token = tokenizer.peek();
+            
+            match token {
+                Some(Token::Punctuation(Punctuation::Comma)) => {
+                    tokenizer.next();
+                    continue;
+                }
+                Some(Token::Punctuation(Punctuation::RSquare)) => {
+                    tokenizer.next();
+                    println!("=>args: {args:?}");
+                    break;
+                }
+                None => {
+                    break;
+                }
+                _ => {
+                    return Err(ParseError::new(format!(
+                        "unexpect token between call args {token:?}"
+                    )));
+                }
+            };
+        }
+
+        Ok(args)
+    }
+
+
 }
 
 /// https://doc.rust-lang.org/reference/expressions.html#expression-precedence
@@ -158,9 +222,7 @@ fn binary_op_priority(op: BinOp) -> u8 {
         BinOp::Bit(BitOp::Xor) => 52,
         BinOp::Bit(_) => 53, // <<  >>
         BinOp::Num(NumOp::Add) | BinOp::Num(NumOp::Sub) => 60,
-        BinOp::Num(NumOp::Mul)
-        | BinOp::Num(NumOp::Div)
-        | BinOp::Num(NumOp::Mod) => 61,
+        BinOp::Num(NumOp::Mul) | BinOp::Num(NumOp::Div) | BinOp::Num(NumOp::Mod) => 61,
     }
 }
 
@@ -170,7 +232,7 @@ mod test {
 
     #[test]
     fn test_parser_expr() {
-        let inputs = ["a+b-c*d", "a*b-c+d", "a*b/c%d", "a-b*c+d", "-a*b-c+d"];
+        let inputs = ["a+b-c*d", "a*b-c+d", "a*b/c%d", "a-b*c+d", "-a*b-c+d", "a+b[c[d[e]]]*f", "a+b()-c", "a+b(c,d,e,f)-g*h"];
 
         for input in &inputs {
             let tokenizer = Tokenizer::new("", input).stripped();
@@ -183,10 +245,14 @@ mod test {
         }
     }
 
-    
     #[test]
     fn test_parser_math_expr() {
-        let inputs = [("1+2-3+4-5", -1), ("1*4/2*3", 6), ("1+2*3-4", 3), ("1+3*4*5/2-6", 25)];
+        let inputs = [
+            ("1+2-3+4-5", -1),
+            ("1*4/2*3", 6),
+            ("1+2*3-4", 3),
+            ("1+3*4*5/2-6", 25),
+        ];
 
         for input in &inputs {
             let tokenizer = Tokenizer::new("", input.0).stripped();

@@ -75,6 +75,7 @@ pub enum Expr {
     PrefixOp(PrefixOpExpr),
     PostfixOp(PostfixOpExpr),
     BinOp(BinOpExpr),
+    Index(IndexExpr),
     FuncCall(FuncCallExpr),
     Block(BlockExpr),
     Eof,
@@ -85,6 +86,15 @@ impl Expr {
         match expr {
             Expr::BinOp(BinOpExpr { op, lhs, rhs }) => {
                 writeln!(f, "{:indent$}{:?}", "", op, indent = level * LEVEL_INDENT)?;
+
+                level += 1;
+
+                Self::traval_expr(lhs, level, f)?;
+
+                Self::traval_expr(rhs, level, f)?;
+            }
+            Expr::Index(IndexExpr { lhs, rhs }) => {
+                writeln!(f, "{:indent$}{:?}", "", "IndexOp", indent = level * LEVEL_INDENT)?;
 
                 level += 1;
 
@@ -195,6 +205,12 @@ fn write_ident(level: usize, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 #[derive(Debug, Clone)]
 pub struct BlockExpr {
     pub block: Vec<AstNode>,
+}
+
+#[derive(Debug, Clone)]
+pub struct IndexExpr {
+    pub lhs: Box<Expr>,
+    pub rhs: Box<Expr>,
 }
 
 #[derive(Debug, Clone)]
