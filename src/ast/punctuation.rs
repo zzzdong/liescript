@@ -78,7 +78,7 @@ define_punctuations! {
     Dot        => ".",
     DotDot     => "..",
     DotDotEq   => "..=",
-    Comman     => ",",
+    Comma     => ",",
     Semicolon  => ";",
     Colon      => ":",
     PathSep    => "::",
@@ -93,7 +93,6 @@ define_punctuations! {
     RSquare    => "]",
     LBracket   => "{",
     RBracker   => "}",
-    Comma      => ",",
-    SQuotes    => "'",
-    DQuotes    => "\"",
+    // SQuotes    => "'",
+    // DQuotes    => "\"",
 }

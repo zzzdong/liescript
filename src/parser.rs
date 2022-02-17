@@ -114,6 +114,7 @@ impl Parser {
                     continue;
                 }
                 Some(Token::Punctuation(Punctuation::RSquare)) 
+                | Some(Token::Punctuation(Punctuation::RParen)) 
                 | Some(Token::Punctuation(Punctuation::Comma)) 
                 | Some(Token::Punctuation(Punctuation::Semicolon)) => {
                     break;
@@ -162,6 +163,11 @@ impl Parser {
 
         tokenizer.next(); // eat "("
 
+        if let Some(Token::Punctuation(Punctuation::RParen)) = tokenizer.peek() {
+            tokenizer.next();
+            return Ok(args);
+        }
+
         loop {
             let arg = Self::parse_expr(tokenizer, 0)?;
 
@@ -174,7 +180,7 @@ impl Parser {
                     tokenizer.next();
                     continue;
                 }
-                Some(Token::Punctuation(Punctuation::RSquare)) => {
+                Some(Token::Punctuation(Punctuation::RParen)) => {
                     tokenizer.next();
                     println!("=>args: {args:?}");
                     break;

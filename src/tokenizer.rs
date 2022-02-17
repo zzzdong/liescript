@@ -406,7 +406,7 @@ mod test {
                     Token::ident("a"),
                     Token::punctuation("="),
                     Token::ident("b"),
-                    Token::punctuation("-"),
+                    Token::punctuation("+"),
                     Token::ident("c"),
                     Token::punctuation("*"),
                     Token::int(123),
