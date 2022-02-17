@@ -1,4 +1,10 @@
-use std::fmt;
+use std::{fmt, path::Prefix};
+
+use super::{
+    literal::Literal,
+    op::{BinOp, PostfixOp, PrefixOp},
+    Ident,
+};
 
 const LEVEL_INDENT: usize = 2;
 
@@ -64,11 +70,11 @@ pub struct FuncDefStmt {
 
 #[derive(Debug, Clone)]
 pub enum Expr {
-    Literal(LiteralExpr),
     Ident(IdentExpr),
+    Literal(LiteralExpr),
+    PrefixOp(PrefixOpExpr),
+    PostfixOp(PostfixOpExpr),
     BinOp(BinOpExpr),
-    Prefix(PrefixOpExpr),
-    Postfix(PostfixOpExpr),
     FuncCall(FuncCallExpr),
     Block(BlockExpr),
     Eof,
@@ -86,19 +92,19 @@ impl Expr {
 
                 Self::traval_expr(rhs, level, f)?;
             }
-            Expr::Prefix(PrefixOpExpr { op, rhs }) => {
+            Expr::PrefixOp(PrefixOpExpr { op, rhs }) => {
                 writeln!(f, "{:indent$}{:?}", "", op, indent = level * LEVEL_INDENT)?;
 
                 level += 1;
 
                 Self::traval_expr(rhs, level, f)?;
             }
-            Expr::Postfix(PostfixOpExpr { op, lhs }) => {
+            Expr::PostfixOp(PostfixOpExpr { op, lhs: rhs }) => {
                 writeln!(f, "{:indent$}{:?}", "", op, indent = level * LEVEL_INDENT)?;
 
                 level += 1;
 
-                Self::traval_expr(lhs, level, f)?;
+                Self::traval_expr(rhs, level, f)?;
             }
             Expr::FuncCall(FuncCallExpr { name, params }) => {
                 writeln!(
@@ -134,6 +140,42 @@ impl Expr {
 
         Ok(())
     }
+
+    pub(crate) fn try_do_math(expr: &Expr) -> Result<i64, &'static str> {
+        use super::op::NumOp;
+
+        match expr {
+            Expr::BinOp(BinOpExpr { op, lhs, rhs }) => {
+                let lhs = Self::try_do_math(lhs)?;
+
+                let rhs = Self::try_do_math(rhs)?;
+
+                match op {
+                    &BinOp::Num(NumOp::Add) => Ok(lhs + rhs),
+                    &BinOp::Num(NumOp::Sub) => Ok(lhs - rhs),
+                    &BinOp::Num(NumOp::Mul) => Ok(lhs * rhs),
+                    &BinOp::Num(NumOp::Div) => Ok(lhs / rhs),
+                    &BinOp::Num(NumOp::Mod) => Ok(lhs % rhs),
+                    _ => Err("unsupport op"),
+                }
+            }
+            Expr::PrefixOp(PrefixOpExpr { op, rhs }) => {
+                let rhs = Self::try_do_math(rhs)?;
+
+                match op {
+                    &PrefixOp::Neg => Ok(-rhs),
+                    _ => Err("unsupport op"),
+                }
+            }
+
+            Expr::Literal(LiteralExpr(lit)) => match lit {
+                &Literal::Integer(i) => Ok(i),
+                _ => Err("unsupport literal"),
+            },
+
+            _ => Err("unsupport expr"),
+        }
+    }
 }
 
 impl fmt::Display for Expr {
@@ -163,79 +205,37 @@ pub struct FuncCallExpr {
 
 #[derive(Debug, Clone)]
 pub struct PrefixOpExpr {
-    pub op: crate::token::Operator,
+    pub op: PrefixOp,
     pub rhs: Box<Expr>,
 }
 
 #[derive(Debug, Clone)]
 pub struct PostfixOpExpr {
-    pub op: crate::token::Operator,
+    pub op: PostfixOp,
     pub lhs: Box<Expr>,
 }
 
 #[derive(Debug, Clone)]
 pub struct BinOpExpr {
-    pub op: crate::token::Operator,
+    pub op: BinOp,
     pub lhs: Box<Expr>,
     pub rhs: Box<Expr>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum LiteralExpr {
-    Char(char),
-    Bool(bool),
-    Integer(i64),
-    Float(f64),
-    String(String),
-}
+pub struct LiteralExpr(Literal);
 
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct IdentExpr {
-    pub ident: String,
-}
-
-impl IdentExpr {
-    pub fn new(ident: impl ToString) -> Self {
-        IdentExpr {
-            ident: ident.to_string(),
-        }
+impl From<Literal> for LiteralExpr {
+    fn from(lit: Literal) -> Self {
+        LiteralExpr(lit)
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum PrefixOp {
-    Neg, // -
-    Not, // !
-}
+#[derive(Debug, Clone, PartialEq)]
+pub struct IdentExpr(Ident);
 
-#[derive(Debug, Clone, Copy)]
-pub enum PostfixOp {
-    Question, // ?
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum Operator {
-    Not, // !
-    Question, // ?
-    Plus,   // +
-    Minus,  // -
-    Mul,    // *
-    Div,    // /
-    Mod,    // %
-    Pow,    // ^
-    LShift, // <<
-    RShift, // >>
-    BitOr,  // |
-    BitAnd, // &
-    And,    // &&
-    Or,     // ||
-    As,     // as
-    Eq,     // ==
-    NotEq,  // !=
-    Lt,     // <
-    LtE,    // <=
-    Gt,     // >
-    GtE,    // >=
-    Dot,    // .
+impl From<Ident> for IdentExpr {
+    fn from(i: Ident) -> Self {
+        IdentExpr(i)
+    }
 }

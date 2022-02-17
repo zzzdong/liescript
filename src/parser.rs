@@ -1,12 +1,11 @@
+use std::borrow::Cow;
 use std::iter::Peekable;
-use std::{borrow::Cow, convert::identity};
 
-use crate::token::{Delimiter, Keyword, Operator, Token};
-use crate::tokenizer::{StrippedTokenizer, Tokenizer};
-use crate::{
-    ast::{Ast, BinOpExpr, Expr, LetStmt, PrefixOpExpr},
-    token::TokenKind,
-};
+use crate::ast::ast::{Ast, BinOpExpr, Expr, PrefixOpExpr};
+use crate::ast::op::{BinOp, PostfixOp, PrefixOp, LogOp, BitOp, NumOp};
+use crate::ast::Punctuation;
+use crate::token::Token;
+use crate::tokenizer::Tokenizer;
 
 #[derive(Debug)]
 pub struct ParseError {
@@ -20,46 +19,6 @@ impl ParseError {
         }
     }
 }
-
-// macro_rules! expect_token {
-//     ($tokenizer:expr, $expect:expr) => {{
-//         match $tokenizer.next() {
-//             Some(t) if t == $expect => t,
-//             Some(t) => {
-//                 return Err(ParseError::new(format!(
-//                     "expect {:?}, but found {:?}",
-//                     $expect, t
-//                 )))
-//             }
-//             None => {
-//                 return Err(ParseError::new(format!(
-//                     "expect {:?}, but found EOF",
-//                     $expect
-//                 )))
-//             }
-//         }
-//     }};
-// }
-
-// macro_rules! expect_kind {
-//     ($tokenizer:expr, $expect:expr) => {{
-//         match $tokenizer.next() {
-//             Some(t) if t.kind() == $expect => t,
-//             Some(t) => {
-//                 return Err(ParseError::new(format!(
-//                     "expect {:?}, but found {:?}",
-//                     $expect, t
-//                 )))
-//             }
-//             None => {
-//                 return Err(ParseError::new(format!(
-//                     "expect {:?}, but found EOF",
-//                     $expect
-//                 )))
-//             }
-//         }
-//     }};
-// }
 
 pub struct Parser {}
 
@@ -96,25 +55,24 @@ impl Parser {
     // 4. prefix op
     // 5. bin op
     fn parse_expr(
-        tokenizer: &mut Peekable<StrippedTokenizer>,
+        tokenizer: &mut Peekable<impl Iterator<Item = Token>>,
         prev_priority: u8,
     ) -> Result<Expr, ParseError> {
         let token = tokenizer.next();
 
         let mut lhs = match token {
-            Some(Token::Literal(lit)) => Expr::Literal(lit),
-            Some(Token::Ident(ident)) => Expr::Ident(ident),
-            Some(Token::Operator(op)) => {
+            Some(Token::Literal(lit)) => Expr::Literal(lit.into()),
+            Some(Token::Ident(ident)) => Expr::Ident(ident.into()),
+            Some(Token::Punctuation(op)) => {
+                let op = PrefixOp::from_punctuation(op).map_err(|_| {
+                    ParseError::new(format!("expect prefix operator, but found {token:?}"))
+                })?;
+
                 let priority = prefix_op_priority(op);
-                let rhs = match priority {
-                    Some(p) => Self::parse_expr(tokenizer, p)?,
-                    None => {
-                        return Err(ParseError::new(format!(
-                            "unexpect prefix operator: {token:?}"
-                        )))
-                    }
-                };
-                Expr::Prefix(PrefixOpExpr {
+
+                let rhs = Self::parse_expr(tokenizer, priority)?;
+
+                Expr::PrefixOp(PrefixOpExpr {
                     op,
                     rhs: Box::new(rhs),
                 })
@@ -130,31 +88,35 @@ impl Parser {
         loop {
             let token = tokenizer.peek();
             match token {
-                Some(Token::Operator(op)) => match infix_op_priority(op.clone()) {
-                    Some(p) => {
-                        if prev_priority <= p {
-                            break;
-                        } else {
-                            let op = op.clone();
-                            tokenizer.next();
-
-                            let rhs = Self::parse_expr(tokenizer, p)?;
-                            lhs = Expr::BinOp(BinOpExpr {
-                                op,
-                                lhs: Box::new(lhs),
-                                rhs: Box::new(rhs),
-                            });
-                            continue;
-                        }
-                    }
-                    None => {
-                        return Err(ParseError::new(format!("unexpect infix op {op:?}")));
-                    }
-                },
-                Some(Token::Delimiter(Delimiter::LSquare))
-                | Some(Token::Delimiter(Delimiter::LParen)) => {
+                Some(Token::Punctuation(Punctuation::LSquare))
+                | Some(Token::Punctuation(Punctuation::LParen)) => {
+                    // TODO: index op ("[")
+                    // TODO: func call ("(")
                     unimplemented!();
                 }
+                Some(Token::Punctuation(op)) => {
+                    let op = BinOp::from_punctuation(*op).map_err(|_| {
+                        ParseError::new(format!("expect binary operator, but found {token:?}"))
+                    })?;
+
+                    let priority = binary_op_priority(op);
+
+                    if prev_priority >= priority {
+                        break;
+                    } else {
+                        let op = op.clone();
+                        tokenizer.next();
+
+                        let rhs = Self::parse_expr(tokenizer, priority)?;
+                        lhs = Expr::BinOp(BinOpExpr {
+                            op,
+                            lhs: Box::new(lhs),
+                            rhs: Box::new(rhs),
+                        });
+                        continue;
+                    }
+                }
+
                 Some(_) => {
                     return Err(ParseError::new(format!(
                         "unexpect token in binop expr {token:?}"
@@ -164,186 +126,78 @@ impl Parser {
                     return Ok(lhs);
                 }
             }
-
-            break;
         }
 
         Ok(lhs)
-    }
-
-    fn parse_expr2(mut tokenizer: impl Iterator<Item = Token>) -> Result<Expr, ParseError> {
-        unimplemented!();
-
-        let mut top = Frame {
-            min_bp: 0,
-            lhs: None,
-            token: None,
-        };
-
-        let mut stack = Vec::new();
-
-        loop {
-            let token = tokenizer.next();
-
-            let token = token.as_ref();
-
-            let (token, r_bp) = loop {
-                match binding_power(token, top.lhs.is_none()) {
-                    Some((t, (l_bp, r_bp))) if top.min_bp <= l_bp => break (t, r_bp),
-                    _ => {
-                        let res = top;
-                        top = match stack.pop() {
-                            Some(it) => it,
-                            None => {
-                                eprintln!();
-                                return res.lhs.ok_or(ParseError::new("stack empty"));
-                            }
-                        };
-
-                        let op = res.token.unwrap();
-                        match op {
-                            Token::Operator(op) => {
-                                top.lhs = Some(match top.lhs {
-                                    Some(lhs) => Expr::BinOp(BinOpExpr {
-                                        op,
-                                        lhs: Box::new(lhs),
-                                        rhs: Box::new(res.lhs.unwrap()),
-                                    }),
-                                    None => Expr::Prefix(PrefixOpExpr {
-                                        op,
-                                        rhs: Box::new(res.lhs.unwrap()),
-                                    }),
-                                });
-                            }
-                            _ => {
-                                unreachable!()
-                            }
-                        }
-                    }
-                };
-            };
-
-            if token == &Token::Delimiter(Delimiter::RParen) {
-                let res = top;
-                top = stack.pop().unwrap();
-                top.lhs = res.lhs;
-                continue;
-            }
-
-            stack.push(top);
-            top = Frame {
-                min_bp: r_bp,
-                lhs: None,
-                token: Some(*token),
-            };
-        }
     }
 }
 
 /// https://doc.rust-lang.org/reference/expressions.html#expression-precedence
 
-fn prefix_op_priority(op: Operator) -> Option<u8> {
+fn prefix_op_priority(op: PrefixOp) -> u8 {
     match op {
-        Operator::Plus | Operator::Minus | Operator::Not => Some(90),
-        _ => None,
+        PrefixOp::Neg | PrefixOp::Not => 90,
     }
 }
 
-fn infix_op_priority(op: Operator) -> Option<u8> {
+fn postfix_op_priority(op: PostfixOp) -> u8 {
     match op {
-        Operator::Assign => Some(10),
-        Operator::DotDot => Some(20),
-        Operator::Or => Some(30),
-        Operator::And => Some(31),
-        Operator::Eq | Operator::NotEq 
-        | Operator::Lt | Operator::Gt 
-        |Operator::LtE | Operator::GtE  => Some(40),
-        // bit op (| ^ & << >>) 50
-        Operator::Plus | Operator::Minus => Some(60),
-        Operator::Mul | Operator::Div | Operator::Mod => Some(70),
-        _ => None,
+        PostfixOp::Question => 100,
     }
 }
 
-fn prefix_binding_power(op: Operator) -> ((), u8) {
+fn binary_op_priority(op: BinOp) -> u8 {
     match op {
-        Operator::And | Operator::Minus | Operator::Dot => ((), 9),
-        _ => panic!("bad op: {:?}", op),
+        BinOp::Assign(_) => 10,
+        BinOp::Range(_) => 20,
+        BinOp::Log(LogOp::Or) => 30,
+        BinOp::Log(LogOp::And) => 31,
+        BinOp::Comp(_) => 40,
+        BinOp::Bit(BitOp::Or) => 50,
+        BinOp::Bit(BitOp::And) => 51,
+        BinOp::Bit(BitOp::Xor) => 52,
+        BinOp::Bit(_) => 53, // <<  >>
+        BinOp::Num(NumOp::Add) | BinOp::Num(NumOp::Sub) => 60,
+        BinOp::Num(NumOp::Mul)
+        | BinOp::Num(NumOp::Div)
+        | BinOp::Num(NumOp::Mod) => 61,
     }
-}
-
-fn postfix_binding_power(op: Operator) -> Option<(u8, ())> {
-    let res = match op {
-        Operator::Question => (11, ()),
-        _ => return None,
-    };
-    Some(res)
-}
-
-fn infix_binding_power(op: Operator) -> Option<(u8, u8)> {
-    let res = match op {
-        Operator::And | Operator::Minus => (5, 6),
-        Operator::Mul | Operator::Div | Operator::Mod => (7, 8),
-        Operator::Dot => (14, 13),
-        _ => return None,
-    };
-    Some(res)
-}
-
-fn binding_power(op: Option<&Token>, prefix: bool) -> Option<(&Token, (u8, u8))> {
-    let op = op?;
-
-    let res = match op {
-        Token::Literal(_) => (99, 100),
-        Token::Delimiter(Delimiter::LParen) => (99, 0),
-        Token::Delimiter(Delimiter::RParen) => (0, 100),
-        Token::Operator(Operator::Eq) => (2, 1),
-        Token::Operator(Operator::Plus) | Token::Operator(Operator::Minus) if prefix => (99, 9),
-        Token::Operator(Operator::Plus) | Token::Operator(Operator::Minus) => (5, 6),
-        Token::Operator(Operator::Mul)
-        | Token::Operator(Operator::Div)
-        | Token::Operator(Operator::Mod) => (7, 8),
-        Token::Operator(Operator::Not) => (11, 100),
-        Token::Operator(Operator::Dot) => (14, 13),
-        _ => return None,
-    };
-
-    Some((op, res))
-}
-
-struct Frame {
-    pub min_bp: u8,
-    pub lhs: Option<Expr>,
-    pub token: Option<Token>,
 }
 
 #[cfg(test)]
 mod test {
-    use crate::tokenizer::StrippedTokenizer;
-
     use super::*;
 
     #[test]
     fn test_parser_expr() {
-        let inputs = [
-            "a+b-c*d",
-            "a*b-c+d",
-            "a*b/c%d",
-            "a-b*c+d",
-            "-a*b-c+d",
-
-        ];
+        let inputs = ["a+b-c*d", "a*b-c+d", "a*b/c%d", "a-b*c+d", "-a*b-c+d"];
 
         for input in &inputs {
-            let tokenizer = StrippedTokenizer::new("", input);
+            let tokenizer = Tokenizer::new("", input).stripped();
 
             let mut tokenizer = tokenizer.peekable();
-    
+
             let ret = Parser::parse_expr(&mut tokenizer, 0).unwrap();
-    
-            println!("{}=>\n {}", input,  ret);
+
+            println!("{}=>\n {}", input, ret);
         }
+    }
 
+    
+    #[test]
+    fn test_parser_math_expr() {
+        let inputs = [("1+2-3+4-5", -1), ("1*4/2*3", 6), ("1+2*3-4", 3), ("1+3*4*5/2-6", 25)];
 
+        for input in &inputs {
+            let tokenizer = Tokenizer::new("", input.0).stripped();
+
+            let mut tokenizer = tokenizer.peekable();
+
+            let ret = Parser::parse_expr(&mut tokenizer, 0).unwrap();
+
+            print!("{ret}:\n");
+
+            assert_eq!(Expr::try_do_math(&ret), Ok(input.1));
+        }
     }
 }

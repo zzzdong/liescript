@@ -1,7 +1,7 @@
 use std::{borrow::Cow, str::Chars};
 
-use crate::ast::{IdentExpr, LiteralExpr};
-use crate::token::{Delimiter, Keyword, Location, Operator, Token, TokenError};
+use crate::ast::{Ident, Keyword, Literal, Punctuation};
+use crate::token::{Location, Token, TokenError};
 
 #[derive(Clone)]
 pub struct Tokenizer<'i> {
@@ -51,6 +51,13 @@ impl<'i> Tokenizer<'i> {
                     '\'' => self.eat_char(),
                     '"' => self.eat_string(),
                     _ => {
+                        if self.has_at_lease(3) {
+                            let pat = &self.chars.clone().as_str()[..3];
+                            if pat == "..=" {
+                                self.advance(3);
+                                return Token::Punctuation(Punctuation::DotDotEq);
+                            }
+                        }
                         // try 2 byte
                         if self.has_at_lease(2) {
                             let pat = &self.chars.clone().as_str()[..2];
@@ -58,10 +65,15 @@ impl<'i> Tokenizer<'i> {
                                 "//" => {
                                     return self.eat_comment();
                                 }
-                                "::" | "->" => Some(Token::Delimiter(Delimiter::RArrow)),
-                                "+=" | "-=" | "*=" | "/=" | "%=" | "^=" | "<<" | ">>" | "&&"
-                                | "||" | "==" | "!=" | "<=" | ">=" | ".." => {
-                                    Operator::from_str(pat).ok().map(Token::Operator)
+                                // logic op
+                                "&&" | "||" |
+                                // assign
+                                "+=" | "-=" | "*=" | "/=" | "%=" | "^=" | "&=" | "|=" |
+                                // compare op
+                                "==" | "!=" | ">=" | "<=" |
+                                // others
+                                "::" | "->" | ".." => {
+                                    Punctuation::from_str(pat).ok().map(Token::Punctuation)
                                 }
                                 _ => None,
                             };
@@ -75,11 +87,16 @@ impl<'i> Tokenizer<'i> {
                         // try 1 byte
                         let pat = &self.chars.clone().as_str()[..1];
                         let token = match pat {
-                            "(" | ")" | "[" | "]" | "{" | "}" | "," | ":" | ";" | "#" => {
-                                Delimiter::from_str(pat).ok().map(Token::Delimiter)
+                            // brackets
+                            "(" | ")" | "[" | "]" | "{" | "}" |
+                            // num op
+                            "+" | "-" | "*" | "/" | "%" | "^" |
+                            // compare op
+                            ">" | "<" |
+                            // others
+                            "," | ":" | ";" | "#" | "!" | "?" | "&" | "=" | "." => {
+                                Punctuation::from_str(pat).ok().map(Token::Punctuation)
                             }
-                            "!" | "?" | "+" | "-" | "*" | "/" | "%" | "^" | "<" | ">" | "&" | "="
-                            | "." => Operator::from_str(pat).ok().map(Token::Operator),
                             _ => None,
                         };
 
@@ -157,13 +174,13 @@ impl<'i> Tokenizer<'i> {
         let got = self.eat_while(|c| c.is_ascii_alphanumeric() || c == '_');
 
         match got.as_str() {
-            "true" => Token::Literal(LiteralExpr::Bool(true)),
-            "false" => Token::Literal(LiteralExpr::Bool(false)),
+            "true" => Token::Literal(Literal::Bool(true)),
+            "false" => Token::Literal(Literal::Bool(false)),
             kw if Keyword::STRS.contains(&kw) => {
                 let kw = Keyword::from_str(kw);
                 Token::Keywrod(kw)
             }
-            _ => Token::Ident(IdentExpr::new(got)),
+            _ => Token::Ident(Ident::new(got)),
         }
     }
 
@@ -199,7 +216,7 @@ impl<'i> Tokenizer<'i> {
 
     fn eat_string(&mut self) -> Token {
         match self.eat_qoutes('"') {
-            Ok(s) => Token::Literal(LiteralExpr::String(s)),
+            Ok(s) => Token::Literal(Literal::String(s)),
             Err(t) => t,
         }
     }
@@ -209,7 +226,7 @@ impl<'i> Tokenizer<'i> {
         match self.eat_qoutes('\'') {
             Ok(s) => {
                 if s.chars().count() == 1 {
-                    Token::Literal(LiteralExpr::Char(s.chars().next().unwrap()))
+                    Token::Literal(Literal::Char(s.chars().next().unwrap()))
                 } else {
                     let location = self.location(pos);
                     Token::Error(TokenError::new(location, "too many char for CharLit"))
@@ -280,6 +297,10 @@ impl<'i> Tokenizer<'i> {
 
         Err(Token::Eof)
     }
+
+    pub fn stripped(self) -> StrippedTokenizer<'i> {
+        StrippedTokenizer(self)
+    }
 }
 
 impl<'i> Iterator for Tokenizer<'i> {
@@ -300,7 +321,6 @@ impl<'i> StrippedTokenizer<'i> {
     pub fn new(filename: &str, input: &'i str) -> Self {
         StrippedTokenizer(Tokenizer::new(filename, input))
     }
-
 
     pub fn next_token(&mut self) -> Token {
         match self.0.next_token() {
@@ -362,9 +382,9 @@ mod test {
                 "hello,123,123.4",
                 vec![
                     Token::ident("hello"),
-                    Token::delimiter(","),
+                    Token::punctuation(","),
                     Token::int(123),
-                    Token::delimiter(","),
+                    Token::punctuation(","),
                     Token::float(123.4),
                 ],
             ),
@@ -372,9 +392,9 @@ mod test {
                 r#"hello("hello")123"#,
                 vec![
                     Token::ident("hello"),
-                    Token::delimiter("("),
+                    Token::punctuation("("),
                     Token::string("hello"),
-                    Token::delimiter(")"),
+                    Token::punctuation(")"),
                     Token::int(123),
                 ],
             ),
@@ -384,13 +404,13 @@ mod test {
                     Token::Keywrod(Keyword::Let),
                     Token::whitespace(" "),
                     Token::ident("a"),
-                    Token::Operator(Operator::Assign),
+                    Token::punctuation("="),
                     Token::ident("b"),
-                    Token::Operator(Operator::Plus),
+                    Token::punctuation("-"),
                     Token::ident("c"),
-                    Token::Operator(Operator::Mul),
+                    Token::punctuation("*"),
                     Token::int(123),
-                    Token::Delimiter(Delimiter::Semicolon),
+                    Token::punctuation(";"),
                 ],
             ),
         ];
