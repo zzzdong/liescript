@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::iter::Peekable;
 
-use crate::ast::ast::{Ast, BinOpExpr, Expr, IndexExpr, PrefixOpExpr, FuncCallExpr};
+use crate::ast::ast::{Ast, BinOpExpr, Expr, FuncCallExpr, IndexExpr, PrefixOpExpr};
 use crate::ast::op::{BinOp, BitOp, LogOp, NumOp, PostfixOp, PrefixOp};
 use crate::ast::Punctuation;
 use crate::token::Token;
@@ -58,6 +58,24 @@ impl Parser {
         tokenizer: &mut Peekable<impl Iterator<Item = Token>>,
         prev_priority: u8,
     ) -> Result<Expr, ParseError> {
+        fn not(_token: &Token) -> bool {
+            false
+        }
+
+        Self::parse_expr_until(tokenizer, prev_priority, not)
+    }
+
+    fn parse_expr_until(
+        tokenizer: &mut Peekable<impl Iterator<Item = Token>>,
+        prev_priority: u8,
+        predicate: impl Fn(&Token) -> bool,
+    ) -> Result<Expr, ParseError> {
+        if let Some(token) = tokenizer.peek() {
+            if predicate(token) {
+                return Ok(Expr::Completed);
+            }
+        }
+
         let token = tokenizer.next();
 
         let mut lhs = match token {
@@ -87,11 +105,17 @@ impl Parser {
 
         loop {
             let token = tokenizer.peek();
-            
+
             match token {
+                // Index Expr
                 Some(Token::Punctuation(Punctuation::LSquare)) => {
                     tokenizer.next();
-                    let rhs = Self::parse_expr(tokenizer, 0)?;
+
+                    fn is_rsquare(token: &Token) -> bool {
+                        token == &Token::Punctuation(Punctuation::RSquare)
+                    }
+
+                    let rhs = Self::parse_expr_until(tokenizer, 0, is_rsquare)?;
                     assert_eq!(
                         tokenizer.next(),
                         Some(Token::Punctuation(Punctuation::RSquare))
@@ -102,22 +126,18 @@ impl Parser {
                     });
                     continue;
                 }
-
+                // FuncCall Expr
                 Some(Token::Punctuation(Punctuation::LParen)) => {
-                    // TODO: func call ("(")
                     let args = Self::parse_func_call_args(tokenizer)?;
-                    println!("args: {args:?}");
-                    lhs = Expr::FuncCall(FuncCallExpr{
+
+                    lhs = Expr::FuncCall(FuncCallExpr {
                         name: Box::new(lhs),
                         params: args,
                     });
                     continue;
                 }
-                Some(Token::Punctuation(Punctuation::RSquare)) 
-                | Some(Token::Punctuation(Punctuation::RParen)) 
-                | Some(Token::Punctuation(Punctuation::Comma)) 
-                | Some(Token::Punctuation(Punctuation::Semicolon)) => {
-                    break;
+                Some(token) if predicate(token) => {
+                    return Ok(lhs);
                 }
                 Some(Token::Punctuation(op)) => {
                     let op = BinOp::from_punctuation(*op).map_err(|_| {
@@ -159,6 +179,13 @@ impl Parser {
     fn parse_func_call_args(
         tokenizer: &mut Peekable<impl Iterator<Item = Token>>,
     ) -> Result<Vec<Expr>, ParseError> {
+        fn is_args_delimit(token: &Token) -> bool {
+            matches!(
+                token,
+                Token::Punctuation(Punctuation::Comma) | Token::Punctuation(Punctuation::RParen)
+            )
+        }
+
         let mut args = Vec::new();
 
         tokenizer.next(); // eat "("
@@ -169,12 +196,12 @@ impl Parser {
         }
 
         loop {
-            let arg = Self::parse_expr(tokenizer, 0)?;
+            let arg = Self::parse_expr_until(tokenizer, 0, is_args_delimit)?;
 
             args.push(arg);
 
             let token = tokenizer.peek();
-            
+
             match token {
                 Some(Token::Punctuation(Punctuation::Comma)) => {
                     tokenizer.next();
@@ -182,10 +209,6 @@ impl Parser {
                 }
                 Some(Token::Punctuation(Punctuation::RParen)) => {
                     tokenizer.next();
-                    println!("=>args: {args:?}");
-                    break;
-                }
-                None => {
                     break;
                 }
                 _ => {
@@ -198,8 +221,6 @@ impl Parser {
 
         Ok(args)
     }
-
-
 }
 
 /// https://doc.rust-lang.org/reference/expressions.html#expression-precedence
@@ -238,7 +259,17 @@ mod test {
 
     #[test]
     fn test_parser_expr() {
-        let inputs = ["a+b-c*d", "a*b-c+d", "a*b/c%d", "a-b*c+d", "-a*b-c+d", "a+b[c[d[e]]]*f", "a+b()-c", "a+b(c,d,e,f)-g*h"];
+        let inputs = [
+            "a+b-c*d",
+            "a*b-c+d",
+            "a*b/c%d",
+            "a-b*c+d",
+            "-a*b-c+d",
+            "a+b[c[d[e]]]*f",
+            "a+b()-c",
+            "a+b(c,d,e,f[g])-h*i",
+            "a+b(c(d,e),f[g])-h*i",
+        ];
 
         for input in &inputs {
             let tokenizer = Tokenizer::new("", input).stripped();
