@@ -95,7 +95,13 @@ impl Expr {
                 Self::traval_expr(rhs, level, f)?;
             }
             Expr::Index(IndexExpr { lhs, rhs }) => {
-                writeln!(f, "{:indent$}{}", "", "IndexOp", indent = level * LEVEL_INDENT)?;
+                writeln!(
+                    f,
+                    "{:indent$}{}",
+                    "",
+                    "IndexOp",
+                    indent = level * LEVEL_INDENT
+                )?;
 
                 level += 1;
 

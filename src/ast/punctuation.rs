@@ -1,5 +1,3 @@
-
-
 macro_rules! define_punctuations {
     (
         $(
@@ -41,7 +39,6 @@ macro_rules! define_punctuations {
         }
     };
 }
-
 
 define_punctuations! {
     Plus       => "+",

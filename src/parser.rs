@@ -68,7 +68,7 @@ impl Parser {
     fn parse_expr_until(
         tokenizer: &mut Peekable<impl Iterator<Item = Token>>,
         prev_priority: u8,
-        predicate: impl Fn(&Token) -> bool,
+        predicate: impl Fn(&Token) -> bool + Copy,
     ) -> Result<Expr, ParseError> {
         if let Some(token) = tokenizer.peek() {
             if predicate(token) {
@@ -81,6 +81,19 @@ impl Parser {
         let mut lhs = match token {
             Some(Token::Literal(lit)) => Expr::Literal(lit.into()),
             Some(Token::Ident(ident)) => Expr::Ident(ident.into()),
+            // group
+            Some(Token::Punctuation(Punctuation::LParen)) => {
+                fn is_group_dilimite(token: &Token) -> bool {
+                    token == &Token::Punctuation(Punctuation::RParen)
+                }
+
+                let group = Self::parse_expr_until(tokenizer, 0, is_group_dilimite)?;
+                assert_eq!(
+                    tokenizer.next(),
+                    Some(Token::Punctuation(Punctuation::RParen))
+                );
+                group
+            }
             Some(Token::Punctuation(op)) => {
                 let op = PrefixOp::from_punctuation(op).map_err(|_| {
                     ParseError::new(format!("expect prefix operator, but found {token:?}"))
@@ -107,6 +120,9 @@ impl Parser {
             let token = tokenizer.peek();
 
             match token {
+                Some(token) if predicate(token) => {
+                    return Ok(lhs);
+                }
                 // Index Expr
                 Some(Token::Punctuation(Punctuation::LSquare)) => {
                     tokenizer.next();
@@ -136,9 +152,6 @@ impl Parser {
                     });
                     continue;
                 }
-                Some(token) if predicate(token) => {
-                    return Ok(lhs);
-                }
                 Some(Token::Punctuation(op)) => {
                     let op = BinOp::from_punctuation(*op).map_err(|_| {
                         ParseError::new(format!("expect binary operator, but found {token:?}"))
@@ -152,7 +165,7 @@ impl Parser {
                         let op = op.clone();
                         tokenizer.next();
 
-                        let rhs = Self::parse_expr(tokenizer, priority)?;
+                        let rhs = Self::parse_expr_until(tokenizer, priority, predicate)?;
                         lhs = Expr::BinOp(BinOpExpr {
                             op,
                             lhs: Box::new(lhs),
@@ -269,6 +282,10 @@ mod test {
             "a+b()-c",
             "a+b(c,d,e,f[g])-h*i",
             "a+b(c(d,e),f[g])-h*i",
+            "(a+b)*c-d*e",
+            "a*(b+c)-d*e",
+            "(((a)))",
+            "a[(b+c)*d]",
         ];
 
         for input in &inputs {
@@ -276,9 +293,11 @@ mod test {
 
             let mut tokenizer = tokenizer.peekable();
 
+            println!("{}=>", input);
+
             let ret = Parser::parse_expr(&mut tokenizer, 0).unwrap();
 
-            println!("{}=>\n {}", input, ret);
+            println!("{}", ret);
         }
     }
 
@@ -289,6 +308,7 @@ mod test {
             ("1*4/2*3", 6),
             ("1+2*3-4", 3),
             ("1+3*4*5/2-6", 25),
+            ("1*(2+3)-4*5", -15),
         ];
 
         for input in &inputs {
