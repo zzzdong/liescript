@@ -1,3 +1,5 @@
+use std::fmt;
+
 use super::punctuation::Punctuation;
 
 macro_rules! define_op {
@@ -46,8 +48,14 @@ macro_rules! define_op {
                     $($def::$name => $str,)*
                 }
             }
+        }
 
-
+        impl fmt::Display for $def {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                match self {
+                    $($def::$name => write!(f, $str),)*
+                }
+            }
         }
     };
 }
@@ -105,6 +113,11 @@ define_op!(RangeOp,
     "..=" => (RangeTo, DotDotEq),
 );
 
+define_op!(AccessOp,
+    "." => (Field, Dot),
+    "::=" => (Path, PathSep),
+);
+
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum BinOp {
     Num(NumOp),
@@ -113,6 +126,7 @@ pub enum BinOp {
     Log(LogOp),
     Assign(AssignOp),
     Range(RangeOp),
+    Access(AccessOp),
 }
 
 impl BinOp {
@@ -150,7 +164,24 @@ impl BinOp {
             // range op
             Punctuation::DotDot => Ok(BinOp::Range(RangeOp::Range)),
             Punctuation::DotDotEq => Ok(BinOp::Range(RangeOp::RangeTo)),
+            // field access
+            Punctuation::Dot => Ok(BinOp::Access(AccessOp::Field)),
+            Punctuation::PathSep => Ok(BinOp::Access(AccessOp::Path)),
             _ => Err("unknown bin op"),
+        }
+    }
+}
+
+impl fmt::Display for BinOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BinOp::Num(op) => write!(f, "{}", op.as_str()),
+            BinOp::Bit(op) => write!(f, "{}", op.as_str()),
+            BinOp::Comp(op) => write!(f, "{}", op.as_str()),
+            BinOp::Log(op) => write!(f, "{}", op.as_str()),
+            BinOp::Assign(op) => write!(f, "{}", op.as_str()),
+            BinOp::Range(op) => write!(f, "{}", op.as_str()),
+            BinOp::Access(op) => write!(f, "{}", op.as_str()),
         }
     }
 }

@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::iter::Peekable;
 
 use crate::ast::ast::{Ast, BinOpExpr, Expr, FuncCallExpr, IndexExpr, PrefixOpExpr};
-use crate::ast::op::{BinOp, BitOp, LogOp, NumOp, PostfixOp, PrefixOp};
+use crate::ast::op::{AccessOp, BinOp, BitOp, LogOp, NumOp, PostfixOp, PrefixOp};
 use crate::ast::Punctuation;
 use crate::token::Token;
 use crate::tokenizer::Tokenizer;
@@ -263,6 +263,8 @@ fn binary_op_priority(op: BinOp) -> u8 {
         BinOp::Bit(_) => 53, // <<  >>
         BinOp::Num(NumOp::Add) | BinOp::Num(NumOp::Sub) => 60,
         BinOp::Num(NumOp::Mul) | BinOp::Num(NumOp::Div) | BinOp::Num(NumOp::Mod) => 61,
+        BinOp::Access(AccessOp::Field) => 110,
+        BinOp::Access(AccessOp::Path) => 120,
     }
 }
 
@@ -298,6 +300,10 @@ mod test {
             let ret = Parser::parse_expr(&mut tokenizer, 0).unwrap();
 
             println!("{}", ret);
+
+            let mut graph = petgraph::Graph::new();
+            Expr::expr_graph(&ret, &mut graph);
+            println!("{}", petgraph::dot::Dot::new(&graph));
         }
     }
 

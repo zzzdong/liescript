@@ -193,6 +193,81 @@ impl Expr {
             _ => Err("unsupport expr"),
         }
     }
+
+    pub fn expr_graph(
+        expr: &Expr,
+        graph: &mut petgraph::Graph<String, u32>,
+    ) -> petgraph::graph::NodeIndex {
+        match expr {
+            Expr::BinOp(BinOpExpr { op, lhs, rhs }) => {
+                let node = graph.add_node(format!("{op}"));
+
+                let lhs = Self::expr_graph(lhs, graph);
+
+                let rhs = Self::expr_graph(rhs, graph);
+
+                graph.add_edge(node, lhs, 200);
+                graph.add_edge(node, rhs, 100);
+
+                node
+            }
+            Expr::Index(IndexExpr { lhs, rhs }) => {
+                let node = graph.add_node("IndexOpExpr".into());
+
+                let lhs = Self::expr_graph(lhs, graph);
+
+                let rhs = Self::expr_graph(rhs, graph);
+
+                graph.add_edge(node, lhs, 200);
+                graph.add_edge(node, rhs, 100);
+
+                node
+            }
+            Expr::PrefixOp(PrefixOpExpr { op, rhs }) => {
+                let node = graph.add_node(format!("{op}"));
+
+                let rhs = Self::expr_graph(rhs, graph);
+
+                graph.add_edge(node, rhs, 100);
+
+                node
+            }
+            Expr::PostfixOp(PostfixOpExpr { op, lhs: rhs }) => {
+                let node = graph.add_node(format!("{op}"));
+
+                let rhs = Self::expr_graph(rhs, graph);
+
+                graph.add_edge(node, rhs, 100);
+
+                node
+            }
+            Expr::FuncCall(FuncCallExpr { name, params }) => {
+                let node = graph.add_node("FuncCallExpr".into());
+
+                let lhs = Self::expr_graph(name, graph);
+
+                graph.add_edge(node, lhs, 100);
+
+                for param in params {
+                    let p = Self::expr_graph(param, graph);
+                    graph.add_edge(node, p, 50);
+                }
+                node
+            }
+            Expr::Literal(lit) => {
+                let node = graph.add_node(format!("{lit:?}"));
+
+                node
+            }
+            Expr::Ident(ident) => {
+                let node = graph.add_node(format!("{ident:?}"));
+                node
+            }
+            _ => {
+                unimplemented!()
+            }
+        }
+    }
 }
 
 impl fmt::Display for Expr {
