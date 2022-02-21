@@ -119,6 +119,17 @@ define_op!(AccessOp,
 );
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum OpKind {
+    Num,
+    Bit,
+    Comp,
+    Log,
+    Assign,
+    Range,
+    Access,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum BinOp {
     Num(NumOp),
     Bit(BitOp),
@@ -168,6 +179,18 @@ impl BinOp {
             Punctuation::Dot => Ok(BinOp::Access(AccessOp::Field)),
             Punctuation::PathSep => Ok(BinOp::Access(AccessOp::Path)),
             _ => Err("unknown bin op"),
+        }
+    }
+
+    pub fn kind(&self) -> OpKind {
+        match self {
+            BinOp::Num(_op) => OpKind::Num,
+            BinOp::Bit(_op) => OpKind::Bit,
+            BinOp::Comp(_op) => OpKind::Comp,
+            BinOp::Log(_op) => OpKind::Log,
+            BinOp::Assign(_op) => OpKind::Assign,
+            BinOp::Range(_op) => OpKind::Range,
+            BinOp::Access(_op) => OpKind::Access,
         }
     }
 }

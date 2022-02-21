@@ -178,7 +178,7 @@ impl<'i> Tokenizer<'i> {
             "false" => Token::Literal(Literal::Bool(false)),
             kw if Keyword::STRS.contains(&kw) => {
                 let kw = Keyword::from_str(kw);
-                Token::Keywrod(kw)
+                Token::Keyword(kw)
             }
             _ => Token::Ident(Ident::new(got)),
         }
@@ -401,7 +401,7 @@ mod test {
             (
                 r#"let a=b+c*123;"#,
                 vec![
-                    Token::Keywrod(Keyword::Let),
+                    Token::Keyword(Keyword::Let),
                     Token::whitespace(" "),
                     Token::ident("a"),
                     Token::punctuation("="),

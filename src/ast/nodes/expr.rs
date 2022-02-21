@@ -1,72 +1,11 @@
-use std::{fmt, path::Prefix};
+use crate::ast::ident::Ident;
+use crate::ast::literal::Literal;
+use crate::ast::op::{BinOp, NumOp, PostfixOp, PrefixOp};
+use std::fmt;
 
-use super::{
-    literal::Literal,
-    op::{BinOp, PostfixOp, PrefixOp},
-    Ident,
-};
+use super::AstNode;
 
 const LEVEL_INDENT: usize = 2;
-
-#[derive(Debug, Clone)]
-pub struct Ast {
-    pub children: Vec<AstNode>,
-}
-
-impl Ast {
-    pub fn new() -> Self {
-        Ast {
-            children: Vec::new(),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum AstNode {
-    Import(ImportStmt),
-    Let(LetStmt),
-    StructDef(StructDefStmt),
-    FuncDef(FuncDefStmt),
-    While(WhileStmt),
-    Expression(Expr),
-}
-
-#[derive(Debug, Clone)]
-pub struct ImportStmt {
-    pub path: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct LetStmt {
-    pub ident: String,
-    pub expr: Expr,
-}
-
-#[derive(Debug, Clone)]
-pub struct WhileStmt {
-    pub condition: Expr,
-    pub block: BlockExpr,
-}
-
-#[derive(Debug, Clone)]
-pub struct StructDefStmt {
-    pub name: String,
-    pub fields: Vec<FieldDef>,
-}
-
-#[derive(Debug, Clone)]
-pub struct FieldDef {
-    pub name: String,
-    pub ty: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct FuncDefStmt {
-    pub name: String,
-    pub params: Vec<FieldDef>,
-    pub ret_type: String,
-    pub block: BlockExpr,
-}
 
 #[derive(Debug, Clone)]
 pub enum Expr {
@@ -159,8 +98,6 @@ impl Expr {
     }
 
     pub(crate) fn try_do_math(expr: &Expr) -> Result<i64, &'static str> {
-        use super::op::NumOp;
-
         match expr {
             Expr::BinOp(BinOpExpr { op, lhs, rhs }) => {
                 let lhs = Self::try_do_math(lhs)?;

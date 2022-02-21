@@ -54,7 +54,7 @@ pub enum Token {
     Ident(Ident),
     Literal(Literal),
     Comment(String),
-    Keywrod(Keyword),
+    Keyword(Keyword),
     Punctuation(Punctuation),
     Unknown(char),
     Error(TokenError),

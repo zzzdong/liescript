@@ -1,10 +1,12 @@
 use std::borrow::Cow;
 use std::iter::Peekable;
 
-use crate::ast::ast::{Ast, BinOpExpr, Expr, FuncCallExpr, IndexExpr, PrefixOpExpr};
-use crate::ast::op::{AccessOp, BinOp, BitOp, LogOp, NumOp, PostfixOp, PrefixOp};
+use crate::ast::nodes::expr::{BinOpExpr, Expr, FuncCallExpr, IndexExpr, PrefixOpExpr};
+use crate::ast::nodes::stmt::LetStmt;
+use crate::ast::nodes::{Ast, AstNode};
+use crate::ast::op::{AccessOp, AssignOp, BinOp, BitOp, LogOp, NumOp, PostfixOp, PrefixOp};
 use crate::ast::Punctuation;
-use crate::token::Token;
+use crate::token::{self, Token};
 use crate::tokenizer::Tokenizer;
 
 #[derive(Debug)]
@@ -18,36 +20,83 @@ impl ParseError {
             detail: detail.into(),
         }
     }
+
+    pub fn expect_but_found(expect: Token, found: &Token) -> ParseError {
+        ParseError::new(format!("expect {expect:?}, but found {found:?}"))
+    }
+}
+
+fn is_stmt_end(token: &Token) -> bool {
+    token == &Token::Punctuation(Punctuation::Semicolon)
 }
 
 pub struct Parser {}
 
 impl Parser {
     pub fn parse_str(input: &str) -> Result<Ast, ParseError> {
-        let mut tokenizer = Tokenizer::new("", input);
+        let mut tokenizer = Tokenizer::new("", input).stripped().peekable();
 
         let mut ast = Ast::new();
 
-        // loop {
-        //     let token = tokenizer.next_token()?;
+        loop {
+            let token = tokenizer.peek();
 
-        //     if token == Token::Eof {
-        //         break;
-        //     }
+            match token {
+                Some(Token::Keyword(crate::ast::Keyword::Let)) => {
+                    let let_stmt = Self::parse_let_stmt(&mut tokenizer)?;
+                    ast.children.push(AstNode::Let(let_stmt));
+                }
+                Some(t) => {
+                    return Err(ParseError::new("unknown token {t:?}"));
+                }
+                None => {
+                    break;
+                }
+            }
+        }
 
-        //     match token {
-        //         Token::Keywrod(crate::token::Keyword::Let) => {}
-        //     }
-        // }
-
-        unimplemented!()
+        return Ok(ast);
     }
 
-    // fn parse_let_stmt(tokenizer: impl Iterator<Item = Token>) -> Result<LetStmt, ParseError> {
-    //     let eq = Token::Delimiter(crate::token::Delimiter::Eq);
-    //     let t = expect_token!(tokenizer, eq);
-    //     unimplemented!()
-    // }
+    fn parse_let_stmt(
+        tokenizer: &mut Peekable<impl Iterator<Item = Token>>,
+    ) -> Result<LetStmt, ParseError> {
+        let t = tokenizer.next();
+        assert_eq!(t, Some(Token::Keyword(crate::ast::Keyword::Let)));
+
+        let ident = match tokenizer.next() {
+            Some(Token::Ident(ident)) => ident,
+            t => {
+                return Err(ParseError::new(format!("expect ident, but found {t:?}")));
+            }
+        };
+
+        match tokenizer.next() {
+            Some(Token::Punctuation(Punctuation::Eq)) => {}
+            t => {
+                return Err(ParseError::new(format!("expect `=`, but found {t:?}")));
+            }
+        }
+
+        let expr = Self::parse_expr_until(tokenizer, 0, is_stmt_end)?;
+
+        match expr {
+            Expr::BinOp(BinOpExpr { op, .. }) if op.kind() == crate::ast::op::OpKind::Assign => {
+                return Err(ParseError::new(format!(
+                    "assign expr is not supported in let stmt"
+                )));
+            }
+            // TODO, need to check the return value when if expr or block expr
+            _ => {}
+        };
+
+        assert_eq!(
+            tokenizer.next(),
+            Some(Token::Punctuation(Punctuation::Semicolon))
+        );
+
+        Ok(LetStmt { ident, expr })
+    }
 
     // 1. func call
     // 2. literal
@@ -88,10 +137,17 @@ impl Parser {
                 }
 
                 let group = Self::parse_expr_until(tokenizer, 0, is_group_dilimite)?;
-                assert_eq!(
-                    tokenizer.next(),
-                    Some(Token::Punctuation(Punctuation::RParen))
-                );
+                match tokenizer.peek() {
+                    Some(Token::Punctuation(Punctuation::RParen)) => {
+                        tokenizer.next();
+                    }
+                    t => {
+                        return Err(ParseError::new(format!(
+                            "expect `)` for group end, but found {t:?}"
+                        )));
+                    }
+                }
+
                 group
             }
             Some(Token::Punctuation(op)) => {
@@ -132,14 +188,23 @@ impl Parser {
                     }
 
                     let rhs = Self::parse_expr_until(tokenizer, 0, is_rsquare)?;
-                    assert_eq!(
-                        tokenizer.next(),
-                        Some(Token::Punctuation(Punctuation::RSquare))
-                    );
+
+                    match tokenizer.next() {
+                        Some(Token::Punctuation(Punctuation::RSquare)) => {
+                            tokenizer.next();
+                        }
+                        t => {
+                            return Err(ParseError::new(format!(
+                                "expect `)` for group end, but found {t:?}"
+                            )));
+                        }
+                    }
+
                     lhs = Expr::Index(IndexExpr {
                         lhs: Box::new(lhs),
                         rhs: Box::new(rhs),
                     });
+
                     continue;
                 }
                 // FuncCall Expr
@@ -273,7 +338,7 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_parser_expr() {
+    fn test_parse_expr() {
         let inputs = [
             "a+b-c*d",
             "a*b-c+d",
@@ -308,7 +373,7 @@ mod test {
     }
 
     #[test]
-    fn test_parser_math_expr() {
+    fn test_parse_math_expr() {
         let inputs = [
             ("1+2-3+4-5", -1),
             ("1*4/2*3", 6),
@@ -327,6 +392,21 @@ mod test {
             print!("{ret}:\n");
 
             assert_eq!(Expr::try_do_math(&ret), Ok(input.1));
+        }
+    }
+
+    #[test]
+    fn test_parse_let_stmt() {
+        let inputs = ["let a = a * b;", "let a.b = a*b;"];
+
+        for input in &inputs {
+            let tokenizer = Tokenizer::new("", input).stripped();
+
+            let mut tokenizer = tokenizer.peekable();
+
+            let ret = Parser::parse_let_stmt(&mut tokenizer);
+
+            print!("=> {ret:?}:\n");
         }
     }
 }
