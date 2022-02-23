@@ -362,7 +362,7 @@ pub struct StrippedTokenizer<'i, I: IntoIterator<Item = Token<'i>>> {
 
 impl<'i, I: IntoIterator<Item = Token<'i>>> StrippedTokenizer<'i, I> {
     pub fn with_input(filename: &str, input: &'i str) -> StrippedTokenizer<'i, Tokenizer<'i>> {
-        let iter= Tokenizer::new(filename, input);
+        let iter = Tokenizer::new(filename, input);
         StrippedTokenizer::new(iter)
     }
 
@@ -484,6 +484,30 @@ mod test {
 
         for t in tokenizer {
             println!("{:?}", t);
+        }
+    }
+
+    #[test]
+    fn test_tokenizer_group() {
+        let inputs: Vec<&str> = vec!["a[b[c[d[e[f]]]]]", "a(b(c(d(e()))))"];
+
+        fn print(token: Token) {
+            if let Token::Group(ty, group) = token {
+                for g in group {
+                    print!("->");
+                    print(g)
+                }
+            } else {
+                println!("{token:?}");
+            }
+        }
+
+        for i in inputs {
+            let tokenizer = Tokenizer::new("", i);
+            for t in tokenizer {
+                // print(t)
+                println!("{t:?}");
+            }
         }
     }
 }

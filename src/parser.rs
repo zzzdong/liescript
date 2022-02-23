@@ -175,15 +175,18 @@ impl Parser {
             // }
             // group
             Some(Token::Group(ty, group)) => {
+                println!("debug group {:?}", &group);
                 let mut tokenizer = StrippedTokenizer::new(group.into_iter()).peekable();
                 match ty {
                     token::GroupType::Paren => Self::parse_expr(&mut tokenizer, 0)?,
+                    // index expr 
+                    token::GroupType::Square => {
+                        Self::parse_expr(&mut tokenizer, 0)?
+                        // TODO array define
+                    }
+
                     token::GroupType::Bracket => {
                         unimplemented!()
-                    }
-                    token::GroupType::Square => {
-                        tokenizer.next();
-                        Self::parse_expr(&mut tokenizer, 0)?
                     }
                 }
             }
@@ -217,34 +220,9 @@ impl Parser {
                     return Ok(lhs);
                 }
                 // Index Expr
-                // Some(Token::Punctuation(Punctuation::LSquare)) => {
-                //     tokenizer.next();
-
-                //     let rhs = Self::parse_expr_until(tokenizer, 0, is_rsquare)?;
-
-                //     match tokenizer.next() {
-                //         Some(Token::Punctuation(Punctuation::RSquare)) => {
-                //             tokenizer.next();
-                //         }
-                //         t => {
-                //             return Err(ParseError::new(format!(
-                //                 "expect `)` for group end, but found {t:?}"
-                //             )));
-                //         }
-                //     }
-
-                //     lhs = Expr::Index(IndexExpr {
-                //         lhs: Box::new(lhs),
-                //         rhs: Box::new(rhs),
-                //     });
-
-                //     continue;
-                // }
-                // Index Expr
                 Some(Token::Group(ty, group)) => {
                     if let Some(Token::Group(ty, group)) = tokenizer.next() {
                         let mut tokenizer = StrippedTokenizer::new((group).into_iter()).peekable();
-
                         match ty {
                             token::GroupType::Square => {
                                 tokenizer.next();
@@ -268,17 +246,9 @@ impl Parser {
                                 unimplemented!("token::GroupType::Bracket")
                             }
                         }
+                    } else {
+                        break;
                     }
-                }
-                // FuncCall Expr
-                Some(Token::Punctuation(Punctuation::LParen)) => {
-                    let args = Self::parse_func_call_args(tokenizer)?;
-
-                    lhs = Expr::FuncCall(FuncCallExpr {
-                        name: Box::new(lhs),
-                        params: args,
-                    });
-                    continue;
                 }
                 Some(Token::Punctuation(op)) => {
                     let op = BinOp::from_punctuation(*op).map_err(|_| {
@@ -453,6 +423,20 @@ mod test {
             let mut tokenizer = tokenizer.peekable();
 
             let ret = Parser::parse_let_stmt(&mut tokenizer);
+
+            print!("=> {ret:?}:\n");
+        }
+    }
+
+    #[test]
+    fn test_parse_group() {
+        let inputs: Vec<&str> = vec!["a[b[c[d[e[f]]]]]", "a(b(c(d(e()))))"];
+
+        for input in inputs {
+            let tokenizer = Tokenizer::new("", input).stripped();
+            let mut tokenizer = tokenizer.peekable();
+
+            let ret = Parser::parse_expr(&mut tokenizer, 0);
 
             print!("=> {ret:?}:\n");
         }
