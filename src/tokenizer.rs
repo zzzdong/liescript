@@ -338,7 +338,7 @@ impl<'i> Tokenizer<'i> {
         }
     }
 
-    pub fn stripped<I: Iterator<Item = Token<'i>>>(self) -> StrippedTokenizer<'i, I> {
+    pub fn stripped(self) -> StrippedTokenizer<'i, Tokenizer<'i>> {
         let a = self.into_iter();
         StrippedTokenizer::new(a)
     }
@@ -355,27 +355,14 @@ impl<'i> Iterator for Tokenizer<'i> {
     }
 }
 
-
-// impl<'i> IntoIterator for Tokenizer<'i> {
-//     type Item = Token<'i>;
-//     type IntoIter = Tokenizer<'i>;
-
-//     fn into_iter(self) -> Self::IntoIter {
-//         self.into_iter()
-//     }
-// }
-
-
 #[derive(Clone)]
 pub struct StrippedTokenizer<'i, I: IntoIterator<Item = Token<'i>>> {
     iter: I,
 }
 
 impl<'i, I: IntoIterator<Item = Token<'i>>> StrippedTokenizer<'i, I> {
-    pub fn with_input(filename: &str, input: &'i str) -> StrippedTokenizer<'i, I> {
+    pub fn with_input(filename: &str, input: &'i str) -> StrippedTokenizer<'i, Tokenizer<'i>> {
         let iter= Tokenizer::new(filename, input);
-        // let iter = t.into_iter();
-        // let iter: I = .into_iter();
         StrippedTokenizer::new(iter)
     }
 
@@ -386,16 +373,6 @@ impl<'i, I: IntoIterator<Item = Token<'i>>> StrippedTokenizer<'i, I> {
     pub fn from_iter(iter: I) -> Self {
         StrippedTokenizer { iter }
     }
-
-
-
-    // pub fn next_token(&mut self) -> Token<'i> {
-    //     match self.iter.next() {
-    //         Some(Token::Whitespace(_)) => self.iter.next(),
-    //         Token::Comment(_) => self.iter.next(),
-    //         t => t,
-    //     }
-    // }
 }
 
 impl<'i, I: Iterator<Item = Token<'i>>> Iterator for StrippedTokenizer<'i, I> {

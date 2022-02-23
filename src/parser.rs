@@ -7,7 +7,7 @@ use crate::ast::nodes::{Ast, AstNode};
 use crate::ast::op::{AccessOp, AssignOp, BinOp, BitOp, LogOp, NumOp, PostfixOp, PrefixOp};
 use crate::ast::Punctuation;
 use crate::token::{self, Token};
-use crate::tokenizer::Tokenizer;
+use crate::tokenizer::{self, StrippedTokenizer, Tokenizer};
 
 #[derive(Debug)]
 pub struct ParseError {
@@ -175,10 +175,15 @@ impl Parser {
             // }
             // group
             Some(Token::Group(ty, group)) => {
+                let mut tokenizer = StrippedTokenizer::new(group.into_iter()).peekable();
                 match ty {
-                    token::GroupType::Paren => {
-                        let mut tokenizer = group.into_iter().peekable();
-                        Self::parse_expr_until(&mut tokenizer, prev_priority, predicate)?
+                    token::GroupType::Paren => Self::parse_expr(&mut tokenizer, 0)?,
+                    token::GroupType::Bracket => {
+                        unimplemented!()
+                    }
+                    token::GroupType::Square => {
+                        tokenizer.next();
+                        Self::parse_expr(&mut tokenizer, 0)?
                     }
                 }
             }
@@ -212,28 +217,58 @@ impl Parser {
                     return Ok(lhs);
                 }
                 // Index Expr
-                Some(Token::Punctuation(Punctuation::LSquare)) => {
-                    tokenizer.next();
+                // Some(Token::Punctuation(Punctuation::LSquare)) => {
+                //     tokenizer.next();
 
-                    let rhs = Self::parse_expr_until(tokenizer, 0, is_rsquare)?;
+                //     let rhs = Self::parse_expr_until(tokenizer, 0, is_rsquare)?;
 
-                    match tokenizer.next() {
-                        Some(Token::Punctuation(Punctuation::RSquare)) => {
-                            tokenizer.next();
-                        }
-                        t => {
-                            return Err(ParseError::new(format!(
-                                "expect `)` for group end, but found {t:?}"
-                            )));
+                //     match tokenizer.next() {
+                //         Some(Token::Punctuation(Punctuation::RSquare)) => {
+                //             tokenizer.next();
+                //         }
+                //         t => {
+                //             return Err(ParseError::new(format!(
+                //                 "expect `)` for group end, but found {t:?}"
+                //             )));
+                //         }
+                //     }
+
+                //     lhs = Expr::Index(IndexExpr {
+                //         lhs: Box::new(lhs),
+                //         rhs: Box::new(rhs),
+                //     });
+
+                //     continue;
+                // }
+                // Index Expr
+                Some(Token::Group(ty, group)) => {
+                    if let Some(Token::Group(ty, group)) = tokenizer.next() {
+                        let mut tokenizer = StrippedTokenizer::new((group).into_iter()).peekable();
+
+                        match ty {
+                            token::GroupType::Square => {
+                                tokenizer.next();
+                                let rhs = Self::parse_expr(&mut tokenizer, 0)?;
+                                lhs = Expr::Index(IndexExpr {
+                                    lhs: Box::new(lhs),
+                                    rhs: Box::new(rhs),
+                                });
+                                continue;
+                            }
+                            token::GroupType::Paren => {
+                                let args = Self::parse_func_call_args(&mut tokenizer)?;
+
+                                lhs = Expr::FuncCall(FuncCallExpr {
+                                    name: Box::new(lhs),
+                                    params: args,
+                                });
+                                continue;
+                            }
+                            token::GroupType::Bracket => {
+                                unimplemented!("token::GroupType::Bracket")
+                            }
                         }
                     }
-
-                    lhs = Expr::Index(IndexExpr {
-                        lhs: Box::new(lhs),
-                        rhs: Box::new(rhs),
-                    });
-
-                    continue;
                 }
                 // FuncCall Expr
                 Some(Token::Punctuation(Punctuation::LParen)) => {
@@ -287,13 +322,6 @@ impl Parser {
     ) -> Result<Vec<Expr>, ParseError> {
         let mut args = Vec::new();
 
-        tokenizer.next(); // eat "("
-
-        if let Some(Token::Punctuation(Punctuation::RParen)) = tokenizer.peek() {
-            tokenizer.next();
-            return Ok(args);
-        }
-
         loop {
             let arg = Self::parse_expr_until(tokenizer, 0, is_args_delimit)?;
 
@@ -306,8 +334,7 @@ impl Parser {
                     tokenizer.next();
                     continue;
                 }
-                Some(Token::Punctuation(Punctuation::RParen)) => {
-                    tokenizer.next();
+                None => {
                     break;
                 }
                 _ => {

@@ -200,8 +200,12 @@ impl Expr {
                 let node = graph.add_node(format!("{ident:?}"));
                 node
             }
+            Expr::Eof => {
+                let node = graph.add_node("EOF".into());
+                node
+            }
             _ => {
-                unimplemented!()
+                unimplemented!("{expr:?}")
             }
         }
     }
