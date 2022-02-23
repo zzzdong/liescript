@@ -30,6 +30,25 @@ fn is_stmt_end(token: &Token) -> bool {
     token == &Token::Punctuation(Punctuation::Semicolon)
 }
 
+fn is_eq(token: &Token) -> bool {
+    token == &Token::Punctuation(Punctuation::Eq)
+}
+
+fn is_group_end(token: &Token) -> bool {
+    token == &Token::Punctuation(Punctuation::RParen)
+}
+
+fn is_rsquare(token: &Token) -> bool {
+    token == &Token::Punctuation(Punctuation::RSquare)
+}
+
+fn is_args_delimit(token: &Token) -> bool {
+    matches!(
+        token,
+        Token::Punctuation(Punctuation::Comma) | Token::Punctuation(Punctuation::RParen)
+    )
+}
+
 pub struct Parser {}
 
 impl Parser {
@@ -58,17 +77,25 @@ impl Parser {
         return Ok(ast);
     }
 
-    fn parse_let_stmt(
-        tokenizer: &mut Peekable<impl Iterator<Item = Token>>,
+    fn parse_let_stmt<'i>(
+        tokenizer: &mut Peekable<impl Iterator<Item = Token<'i>>>,
     ) -> Result<LetStmt, ParseError> {
         let t = tokenizer.next();
         assert_eq!(t, Some(Token::Keyword(crate::ast::Keyword::Let)));
 
-        let ident = match tokenizer.next() {
-            Some(Token::Ident(ident)) => ident,
-            t => {
-                return Err(ParseError::new(format!("expect ident, but found {t:?}")));
-            }
+        // let ident = match tokenizer.next() {
+        //     Some(Token::Ident(ident)) => ident,
+        //     t => {
+        //         return Err(ParseError::new(format!("expect ident, but found {t:?}")));
+        //     }
+        // };
+
+        let name = Self::parse_expr_until(tokenizer, 0, is_eq)?;
+
+        let ident = if let Expr::Ident(ident) = name {
+            ident.ident()
+        } else {
+            return Err(ParseError::new(format!("expect ident, but found {t:?}")));
         };
 
         match tokenizer.next() {
@@ -103,8 +130,8 @@ impl Parser {
     // 3. ident
     // 4. prefix op
     // 5. bin op
-    fn parse_expr(
-        tokenizer: &mut Peekable<impl Iterator<Item = Token>>,
+    fn parse_expr<'i>(
+        tokenizer: &mut Peekable<impl Iterator<Item = Token<'i>>>,
         prev_priority: u8,
     ) -> Result<Expr, ParseError> {
         fn not(_token: &Token) -> bool {
@@ -114,8 +141,8 @@ impl Parser {
         Self::parse_expr_until(tokenizer, prev_priority, not)
     }
 
-    fn parse_expr_until(
-        tokenizer: &mut Peekable<impl Iterator<Item = Token>>,
+    fn parse_expr_until<'i>(
+        tokenizer: &mut Peekable<impl Iterator<Item = Token<'i>>>,
         prev_priority: u8,
         predicate: impl Fn(&Token) -> bool + Copy,
     ) -> Result<Expr, ParseError> {
@@ -130,25 +157,30 @@ impl Parser {
         let mut lhs = match token {
             Some(Token::Literal(lit)) => Expr::Literal(lit.into()),
             Some(Token::Ident(ident)) => Expr::Ident(ident.into()),
+            // // group
+            // Some(Token::Punctuation(Punctuation::LParen)) => {
+            //     let group = Self::parse_expr_until(tokenizer, 0, is_group_end)?;
+            //     match tokenizer.peek() {
+            //         Some(Token::Punctuation(Punctuation::RParen)) => {
+            //             tokenizer.next();
+            //         }
+            //         t => {
+            //             return Err(ParseError::new(format!(
+            //                 "expect `)` for group end, but found {t:?}"
+            //             )));
+            //         }
+            //     }
+
+            //     group
+            // }
             // group
-            Some(Token::Punctuation(Punctuation::LParen)) => {
-                fn is_group_dilimite(token: &Token) -> bool {
-                    token == &Token::Punctuation(Punctuation::RParen)
-                }
-
-                let group = Self::parse_expr_until(tokenizer, 0, is_group_dilimite)?;
-                match tokenizer.peek() {
-                    Some(Token::Punctuation(Punctuation::RParen)) => {
-                        tokenizer.next();
-                    }
-                    t => {
-                        return Err(ParseError::new(format!(
-                            "expect `)` for group end, but found {t:?}"
-                        )));
+            Some(Token::Group(ty, group)) => {
+                match ty {
+                    token::GroupType::Paren => {
+                        let mut tokenizer = group.into_iter().peekable();
+                        Self::parse_expr_until(&mut tokenizer, prev_priority, predicate)?
                     }
                 }
-
-                group
             }
             Some(Token::Punctuation(op)) => {
                 let op = PrefixOp::from_punctuation(op).map_err(|_| {
@@ -182,10 +214,6 @@ impl Parser {
                 // Index Expr
                 Some(Token::Punctuation(Punctuation::LSquare)) => {
                     tokenizer.next();
-
-                    fn is_rsquare(token: &Token) -> bool {
-                        token == &Token::Punctuation(Punctuation::RSquare)
-                    }
 
                     let rhs = Self::parse_expr_until(tokenizer, 0, is_rsquare)?;
 
@@ -254,16 +282,9 @@ impl Parser {
         Ok(lhs)
     }
 
-    fn parse_func_call_args(
-        tokenizer: &mut Peekable<impl Iterator<Item = Token>>,
+    fn parse_func_call_args<'i>(
+        tokenizer: &mut Peekable<impl Iterator<Item = Token<'i>>>,
     ) -> Result<Vec<Expr>, ParseError> {
-        fn is_args_delimit(token: &Token) -> bool {
-            matches!(
-                token,
-                Token::Punctuation(Punctuation::Comma) | Token::Punctuation(Punctuation::RParen)
-            )
-        }
-
         let mut args = Vec::new();
 
         tokenizer.next(); // eat "("

@@ -48,35 +48,43 @@ impl PartialEq for TokenError {
 }
 
 #[derive(Debug, PartialEq)]
-pub enum Token {
+pub enum Token<'i> {
     Eof,
-    Whitespace(String),
+    Whitespace(&'i str),
     Ident(Ident),
     Literal(Literal),
-    Comment(String),
+    Comment(&'i str),
     Keyword(Keyword),
     Punctuation(Punctuation),
+    Group(GroupType, Vec<Token<'i>>),
     Unknown(char),
     Error(TokenError),
 }
 
-impl Token {
-    pub(crate) fn ident(ident: impl ToString) -> Token {
+impl<'i> Token<'i> {
+    pub(crate) fn ident(ident: impl ToString) -> Token<'i> {
         Token::Ident(Ident::new(ident))
     }
-    pub(crate) fn whitespace(ws: impl ToString) -> Token {
-        Token::Whitespace(ws.to_string())
+    pub(crate) fn whitespace(ws: &'i str) -> Token<'i> {
+        Token::Whitespace(ws)
     }
-    pub(crate) fn int(i: i64) -> Token {
+    pub(crate) fn int(i: i64) -> Token<'i> {
         Token::Literal(Literal::Integer(i))
     }
-    pub(crate) fn float(f: f64) -> Token {
+    pub(crate) fn float(f: f64) -> Token<'i> {
         Token::Literal(Literal::Float(f))
     }
-    pub(crate) fn string(s: impl ToString) -> Token {
+    pub(crate) fn string(s: impl ToString) -> Token<'i> {
         Token::Literal(Literal::String(s.to_string()))
     }
     pub(crate) fn punctuation(s: &str) -> Token {
         Token::Punctuation(Punctuation::from_str(s).unwrap())
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum GroupType {
+    Paren,
+    Square,
+    Bracket,
 }

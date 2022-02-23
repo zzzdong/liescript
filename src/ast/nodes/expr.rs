@@ -269,6 +269,14 @@ impl From<Literal> for LiteralExpr {
 #[derive(Debug, Clone, PartialEq)]
 pub struct IdentExpr(Ident);
 
+impl IdentExpr {
+    pub fn ident(self) -> Ident {
+        self.0
+    }
+}
+
+
+
 impl From<Ident> for IdentExpr {
     fn from(i: Ident) -> Self {
         IdentExpr(i)

@@ -21,14 +21,14 @@ pub struct WhileStmt {
 
 #[derive(Debug, Clone)]
 pub struct StructDefStmt {
-    pub name: String,
+    pub name: Ident,
     pub fields: Vec<FieldDef>,
 }
 
 #[derive(Debug, Clone)]
 pub struct FieldDef {
-    pub name: String,
-    pub ty: String,
+    pub name: Ident,
+    pub ty: Ident,
 }
 
 #[derive(Debug, Clone)]

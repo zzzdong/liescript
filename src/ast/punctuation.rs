@@ -89,7 +89,7 @@ define_punctuations! {
     LSquare    => "[",
     RSquare    => "]",
     LBracket   => "{",
-    RBracker   => "}",
+    RBracket   => "}",
     // SQuotes    => "'",
     // DQuotes    => "\"",
 }
