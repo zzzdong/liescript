@@ -14,4 +14,3 @@ impl Ident {
         self.0.as_str()
     }
 }
-

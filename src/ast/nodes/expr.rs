@@ -7,7 +7,7 @@ use super::AstNode;
 
 const LEVEL_INDENT: usize = 2;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Ident(IdentExpr),
     Literal(LiteralExpr),
@@ -15,6 +15,7 @@ pub enum Expr {
     PostfixOp(PostfixOpExpr),
     BinOp(BinOpExpr),
     Index(IndexExpr),
+    Array(ArrayExpr),
     FuncCall(FuncCallExpr),
     Block(BlockExpr),
     Completed,
@@ -62,7 +63,7 @@ impl Expr {
 
                 Self::traval_expr(rhs, level, f)?;
             }
-            Expr::FuncCall(FuncCallExpr { name, params }) => {
+            Expr::FuncCall(FuncCallExpr { name, args: params }) => {
                 writeln!(
                     f,
                     "{:indent$}FunctionCall",
@@ -133,7 +134,7 @@ impl Expr {
 
     pub fn expr_graph(
         expr: &Expr,
-        graph: &mut petgraph::Graph<String, u32>,
+        graph: &mut petgraph::Graph<String, &str>,
     ) -> petgraph::graph::NodeIndex {
         match expr {
             Expr::BinOp(BinOpExpr { op, lhs, rhs }) => {
@@ -143,8 +144,8 @@ impl Expr {
 
                 let rhs = Self::expr_graph(rhs, graph);
 
-                graph.add_edge(node, lhs, 200);
-                graph.add_edge(node, rhs, 100);
+                graph.add_edge(node, lhs, "lhs");
+                graph.add_edge(node, rhs, "rhs");
 
                 node
             }
@@ -155,8 +156,8 @@ impl Expr {
 
                 let rhs = Self::expr_graph(rhs, graph);
 
-                graph.add_edge(node, lhs, 200);
-                graph.add_edge(node, rhs, 100);
+                graph.add_edge(node, lhs, "name");
+                graph.add_edge(node, rhs, "index");
 
                 node
             }
@@ -165,7 +166,7 @@ impl Expr {
 
                 let rhs = Self::expr_graph(rhs, graph);
 
-                graph.add_edge(node, rhs, 100);
+                graph.add_edge(node, rhs, "value");
 
                 node
             }
@@ -174,20 +175,29 @@ impl Expr {
 
                 let rhs = Self::expr_graph(rhs, graph);
 
-                graph.add_edge(node, rhs, 100);
+                graph.add_edge(node, rhs, "value");
 
                 node
             }
-            Expr::FuncCall(FuncCallExpr { name, params }) => {
+            Expr::FuncCall(FuncCallExpr { name, args }) => {
                 let node = graph.add_node("FuncCallExpr".into());
 
                 let lhs = Self::expr_graph(name, graph);
 
-                graph.add_edge(node, lhs, 100);
+                graph.add_edge(node, lhs, "name");
 
-                for param in params {
-                    let p = Self::expr_graph(param, graph);
-                    graph.add_edge(node, p, 50);
+                for arg in args {
+                    let p = Self::expr_graph(arg, graph);
+                    graph.add_edge(node, p, "arg");
+                }
+                node
+            }
+            Expr::Array(ArrayExpr { items }) => {
+                let node = graph.add_node("ArrayExpr".into());
+
+                for item in items {
+                    let p = Self::expr_graph(item, graph);
+                    graph.add_edge(node, p, "item");
                 }
                 node
             }
@@ -200,6 +210,7 @@ impl Expr {
                 let node = graph.add_node(format!("{ident:?}"));
                 node
             }
+
             Expr::Eof => {
                 let node = graph.add_node("EOF".into());
                 node
@@ -225,36 +236,41 @@ fn write_ident(level: usize, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     Ok(())
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BlockExpr {
     pub block: Vec<AstNode>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
+pub struct ArrayExpr {
+    pub items: Vec<Expr>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct IndexExpr {
     pub lhs: Box<Expr>,
     pub rhs: Box<Expr>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FuncCallExpr {
     pub name: Box<Expr>,
-    pub params: Vec<Expr>,
+    pub args: Vec<Expr>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PrefixOpExpr {
     pub op: PrefixOp,
     pub rhs: Box<Expr>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PostfixOpExpr {
     pub op: PostfixOp,
     pub lhs: Box<Expr>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BinOpExpr {
     pub op: BinOp,
     pub lhs: Box<Expr>,
@@ -278,8 +294,6 @@ impl IdentExpr {
         self.0
     }
 }
-
-
 
 impl From<Ident> for IdentExpr {
     fn from(i: Ident) -> Self {

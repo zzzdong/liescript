@@ -1,6 +1,5 @@
 use std::fmt;
 
-
 macro_rules! define_primitive {
     (
         $(
@@ -58,8 +57,7 @@ macro_rules! define_primitive {
     };
 }
 
-
-define_primitive!{
+define_primitive! {
     Byte => "byte",
     Char => "char",
     Int => "int",

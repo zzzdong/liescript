@@ -489,9 +489,9 @@ mod test {
 
     #[test]
     fn test_tokenizer_group() {
-        let inputs: Vec<&str> = vec!["a[b[c[d[e[f]]]]]", "a(b(c(d(e()))))"];
+        let inputs: Vec<&str> = vec!["a[b[c]]", "a[b[c[d[e[f]]]]]", "a(b(c(d(e()))))"];
 
-        fn print(token: Token) {
+        fn print(token: &Token) {
             if let Token::Group(ty, group) = token {
                 for g in group {
                     print!("->");
@@ -505,7 +505,7 @@ mod test {
         for i in inputs {
             let tokenizer = Tokenizer::new("", i);
             for t in tokenizer {
-                // print(t)
+                print(&t);
                 println!("{t:?}");
             }
         }

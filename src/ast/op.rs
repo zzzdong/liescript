@@ -38,7 +38,7 @@ macro_rules! define_op {
 
             pub fn from_punctuation(p: Punctuation) -> Result<Self, &'static str> {
                 match p {
-                    $($punc => Ok($def::$name),)*
+                    $(Punctuation::$punc => Ok($def::$name),)*
                     _ => Err("unknown op"),
                 }
             }

@@ -7,7 +7,7 @@ pub use stmt::*;
 use self::expr::Expr;
 use self::stmt::{FuncDefStmt, ImportStmt, LetStmt, StructDefStmt, WhileStmt};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Ast {
     pub children: Vec<AstNode>,
 }
@@ -20,7 +20,7 @@ impl Ast {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum AstNode {
     Import(ImportStmt),
     Let(LetStmt),

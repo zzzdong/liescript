@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::iter::Peekable;
 
-use crate::ast::nodes::expr::{BinOpExpr, Expr, FuncCallExpr, IndexExpr, PrefixOpExpr};
+use crate::ast::nodes::expr::{ArrayExpr, BinOpExpr, Expr, FuncCallExpr, IndexExpr, PrefixOpExpr};
 use crate::ast::nodes::stmt::LetStmt;
 use crate::ast::nodes::{Ast, AstNode};
 use crate::ast::op::{AccessOp, AssignOp, BinOp, BitOp, LogOp, NumOp, PostfixOp, PrefixOp};
@@ -34,19 +34,8 @@ fn is_eq(token: &Token) -> bool {
     token == &Token::Punctuation(Punctuation::Eq)
 }
 
-fn is_group_end(token: &Token) -> bool {
-    token == &Token::Punctuation(Punctuation::RParen)
-}
-
-fn is_rsquare(token: &Token) -> bool {
-    token == &Token::Punctuation(Punctuation::RSquare)
-}
-
-fn is_args_delimit(token: &Token) -> bool {
-    matches!(
-        token,
-        Token::Punctuation(Punctuation::Comma) | Token::Punctuation(Punctuation::RParen)
-    )
+fn is_comma(token: &Token) -> bool {
+    token == &Token::Punctuation(Punctuation::Comma)
 }
 
 pub struct Parser {}
@@ -157,36 +146,22 @@ impl Parser {
         let mut lhs = match token {
             Some(Token::Literal(lit)) => Expr::Literal(lit.into()),
             Some(Token::Ident(ident)) => Expr::Ident(ident.into()),
-            // // group
-            // Some(Token::Punctuation(Punctuation::LParen)) => {
-            //     let group = Self::parse_expr_until(tokenizer, 0, is_group_end)?;
-            //     match tokenizer.peek() {
-            //         Some(Token::Punctuation(Punctuation::RParen)) => {
-            //             tokenizer.next();
-            //         }
-            //         t => {
-            //             return Err(ParseError::new(format!(
-            //                 "expect `)` for group end, but found {t:?}"
-            //             )));
-            //         }
-            //     }
-
-            //     group
-            // }
             // group
             Some(Token::Group(ty, group)) => {
-                println!("debug group {:?}", &group);
                 let mut tokenizer = StrippedTokenizer::new(group.into_iter()).peekable();
                 match ty {
                     token::GroupType::Paren => Self::parse_expr(&mut tokenizer, 0)?,
-                    // index expr 
-                    token::GroupType::Square => {
-                        Self::parse_expr(&mut tokenizer, 0)?
-                        // TODO array define
+
+                    // parse block
+                    token::GroupType::Bracket => {
+                        unimplemented!();
                     }
 
-                    token::GroupType::Bracket => {
-                        unimplemented!()
+                    // parse array define
+                    token::GroupType::Square => {
+                        let items = Self::parse_comma_delimited(&mut tokenizer)?;
+
+                        Expr::Array(ArrayExpr { items })
                     }
                 }
             }
@@ -219,13 +194,13 @@ impl Parser {
                 Some(token) if predicate(token) => {
                     return Ok(lhs);
                 }
-                // Index Expr
+
                 Some(Token::Group(ty, group)) => {
                     if let Some(Token::Group(ty, group)) = tokenizer.next() {
                         let mut tokenizer = StrippedTokenizer::new((group).into_iter()).peekable();
                         match ty {
+                            // Index Expr
                             token::GroupType::Square => {
-                                tokenizer.next();
                                 let rhs = Self::parse_expr(&mut tokenizer, 0)?;
                                 lhs = Expr::Index(IndexExpr {
                                     lhs: Box::new(lhs),
@@ -233,12 +208,13 @@ impl Parser {
                                 });
                                 continue;
                             }
+                            // func call
                             token::GroupType::Paren => {
-                                let args = Self::parse_func_call_args(&mut tokenizer)?;
+                                let args = Self::parse_comma_delimited(&mut tokenizer)?;
 
                                 lhs = Expr::FuncCall(FuncCallExpr {
                                     name: Box::new(lhs),
-                                    params: args,
+                                    args,
                                 });
                                 continue;
                             }
@@ -287,15 +263,19 @@ impl Parser {
         Ok(lhs)
     }
 
-    fn parse_func_call_args<'i>(
+    fn parse_comma_delimited<'i>(
         tokenizer: &mut Peekable<impl Iterator<Item = Token<'i>>>,
     ) -> Result<Vec<Expr>, ParseError> {
-        let mut args = Vec::new();
+        let mut items = Vec::new();
 
         loop {
-            let arg = Self::parse_expr_until(tokenizer, 0, is_args_delimit)?;
+            let item = Self::parse_expr_until(tokenizer, 0, is_comma)?;
 
-            args.push(arg);
+            if item == Expr::Eof {
+                break;
+            }
+
+            items.push(item);
 
             let token = tokenizer.peek();
 
@@ -309,13 +289,13 @@ impl Parser {
                 }
                 _ => {
                     return Err(ParseError::new(format!(
-                        "unexpect token between call args {token:?}"
+                        "unexpect token between comma delimited {token:?}"
                     )));
                 }
             };
         }
 
-        Ok(args)
+        Ok(items)
     }
 }
 
@@ -371,6 +351,7 @@ mod test {
             "a*(b+c)-d*e",
             "(((a)))",
             "a[(b+c)*d]",
+            "[a, b[c], d(), e(f)]",
         ];
 
         for input in &inputs {
@@ -414,31 +395,37 @@ mod test {
     }
 
     #[test]
-    fn test_parse_let_stmt() {
-        let inputs = ["let a = a * b;", "let a.b = a*b;"];
+    fn test_parse_group() {
+        let inputs: Vec<&str> = vec!["a[b[c]]", "a[b[c[d[e[f]]]]]", "a(b(c(d(e()))))"];
 
-        for input in &inputs {
+        for input in inputs {
             let tokenizer = Tokenizer::new("", input).stripped();
-
             let mut tokenizer = tokenizer.peekable();
 
-            let ret = Parser::parse_let_stmt(&mut tokenizer);
+            let ret = Parser::parse_expr(&mut tokenizer, 0).unwrap();
 
             print!("=> {ret:?}:\n");
         }
     }
 
     #[test]
-    fn test_parse_group() {
-        let inputs: Vec<&str> = vec!["a[b[c[d[e[f]]]]]", "a(b(c(d(e()))))"];
+    fn test_parse_let_stmt() {
+        let inputs = [
+            ("let a = a * b;", true),
+            ("let a = [a, b[c], d(), e(f)];", true),
+            ("let a.b = a*b;", false),
+        ];
 
-        for input in inputs {
-            let tokenizer = Tokenizer::new("", input).stripped();
+        for input in &inputs {
+            let tokenizer = Tokenizer::new("", input.0).stripped();
+
             let mut tokenizer = tokenizer.peekable();
 
-            let ret = Parser::parse_expr(&mut tokenizer, 0);
+            let ret = Parser::parse_let_stmt(&mut tokenizer);
 
             print!("=> {ret:?}:\n");
+
+            assert_eq!(ret.is_ok(), input.1);
         }
     }
 }
