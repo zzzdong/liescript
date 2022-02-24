@@ -4,7 +4,7 @@ use std::iter::Peekable;
 use crate::ast::nodes::expr::{ArrayExpr, BinOpExpr, Expr, FuncCallExpr, IndexExpr, PrefixOpExpr};
 use crate::ast::nodes::stmt::LetStmt;
 use crate::ast::nodes::{Ast, AstNode};
-use crate::ast::op::{AccessOp, AssignOp, BinOp, BitOp, LogOp, NumOp, PostfixOp, PrefixOp};
+use crate::ast::op::{AccessOp, AssignOp, BinOp, BitOp, LogOp, NumOp, OpKind, PostfixOp, PrefixOp};
 use crate::ast::Punctuation;
 use crate::token::{self, Token};
 use crate::tokenizer::{self, StrippedTokenizer, Tokenizer};
@@ -72,19 +72,26 @@ impl Parser {
         let t = tokenizer.next();
         assert_eq!(t, Some(Token::Keyword(crate::ast::Keyword::Let)));
 
-        // let ident = match tokenizer.next() {
-        //     Some(Token::Ident(ident)) => ident,
-        //     t => {
-        //         return Err(ParseError::new(format!("expect ident, but found {t:?}")));
-        //     }
-        // };
+        let var = Self::parse_expr_until(tokenizer, 0, is_eq)?;
 
-        let name = Self::parse_expr_until(tokenizer, 0, is_eq)?;
-
-        let ident = if let Expr::Ident(ident) = name {
-            ident.ident()
-        } else {
-            return Err(ParseError::new(format!("expect ident, but found {t:?}")));
+        let var = match var {
+            Expr::Ident(ident) => (ident.ident(), None),
+            Expr::BinOp(BinOpExpr { op, lhs, rhs }) if op.kind() == OpKind::Decl => {
+                if let Expr::Ident(lident) = lhs.as_ref() {
+                    if let Expr::Ident(rident) = rhs.as_ref() {
+                        (lident.clone().ident(), Some(rident.clone().ident()))
+                    } else {
+                        return Err(ParseError::new(format!("expect decl, but found {rhs:?}")));
+                    }
+                } else {
+                    return Err(ParseError::new(format!("expect var, but found {lhs:?}")));
+                }
+            }
+            _ => {
+                return Err(ParseError::new(format!(
+                    "expect var decl, but found {var:?}"
+                )));
+            }
         };
 
         match tokenizer.next() {
@@ -111,7 +118,11 @@ impl Parser {
             Some(Token::Punctuation(Punctuation::Semicolon))
         );
 
-        Ok(LetStmt { ident, expr })
+        Ok(LetStmt {
+            var: var.0,
+            decl: var.1,
+            expr,
+        })
     }
 
     // 1. func call
@@ -230,22 +241,22 @@ impl Parser {
                     let op = BinOp::from_punctuation(*op).map_err(|_| {
                         ParseError::new(format!("expect binary operator, but found {token:?}"))
                     })?;
-
-                    let priority = binary_op_priority(op);
-
-                    if prev_priority >= priority {
-                        break;
-                    } else {
-                        let op = op.clone();
-                        tokenizer.next();
-
-                        let rhs = Self::parse_expr_until(tokenizer, priority, predicate)?;
-                        lhs = Expr::BinOp(BinOpExpr {
-                            op,
-                            lhs: Box::new(lhs),
-                            rhs: Box::new(rhs),
-                        });
-                        continue;
+                    match Self::parse_binop(tokenizer, op, prev_priority, lhs.clone(), predicate)? {
+                        Some(expr) => {
+                            lhs = expr;
+                            continue;
+                        }
+                        None => break,
+                    }
+                }
+                Some(Token::Keyword(crate::ast::Keyword::As)) => {
+                    let op = BinOp::CastOp;
+                    match Self::parse_binop(tokenizer, op, prev_priority, lhs.clone(), predicate)? {
+                        Some(expr) => {
+                            lhs = expr;
+                            continue;
+                        }
+                        None => break,
                     }
                 }
 
@@ -261,6 +272,32 @@ impl Parser {
         }
 
         Ok(lhs)
+    }
+
+    fn parse_binop<'i>(
+        tokenizer: &mut Peekable<impl Iterator<Item = Token<'i>>>,
+        op: BinOp,
+        prev_priority: u8,
+        lhs: Expr,
+        predicate: impl Fn(&Token) -> bool + Copy,
+    ) -> Result<Option<Expr>, ParseError> {
+        let priority = binary_op_priority(op);
+
+        if prev_priority >= priority {
+            Ok(None)
+        } else {
+            let op = op.clone();
+            tokenizer.next();
+
+            let rhs = Self::parse_expr_until(tokenizer, priority, predicate)?;
+            let lhs = Expr::BinOp(BinOpExpr {
+                op,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            });
+
+            Ok(Some(lhs))
+        }
     }
 
     fn parse_comma_delimited<'i>(
@@ -326,6 +363,7 @@ fn binary_op_priority(op: BinOp) -> u8 {
         BinOp::Bit(_) => 53, // <<  >>
         BinOp::Num(NumOp::Add) | BinOp::Num(NumOp::Sub) => 60,
         BinOp::Num(NumOp::Mul) | BinOp::Num(NumOp::Div) | BinOp::Num(NumOp::Mod) => 61,
+        BinOp::CastOp | BinOp::DeclOp => 70,
         BinOp::Access(AccessOp::Field) => 110,
         BinOp::Access(AccessOp::Path) => 120,
     }
@@ -352,6 +390,8 @@ mod test {
             "(((a)))",
             "a[(b+c)*d]",
             "[a, b[c], d(), e(f)]",
+            "a: A",
+            "a as u8",
         ];
 
         for input in &inputs {
@@ -412,6 +452,7 @@ mod test {
     fn test_parse_let_stmt() {
         let inputs = [
             ("let a = a * b;", true),
+            ("let a : u8 = a * b;", true),
             ("let a = [a, b[c], d(), e(f)];", true),
             ("let a.b = a*b;", false),
         ];

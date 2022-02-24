@@ -9,7 +9,8 @@ pub struct ImportStmt {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LetStmt {
-    pub ident: Ident,
+    pub var: Ident,
+    pub decl: Option<Ident>,
     pub expr: Expr,
 }
 

@@ -127,6 +127,8 @@ pub enum OpKind {
     Assign,
     Range,
     Access,
+    Cast,
+    Decl,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -138,6 +140,8 @@ pub enum BinOp {
     Assign(AssignOp),
     Range(RangeOp),
     Access(AccessOp),
+    CastOp,
+    DeclOp,
 }
 
 impl BinOp {
@@ -178,6 +182,8 @@ impl BinOp {
             // field access
             Punctuation::Dot => Ok(BinOp::Access(AccessOp::Field)),
             Punctuation::PathSep => Ok(BinOp::Access(AccessOp::Path)),
+            // type decl
+            Punctuation::Colon => Ok(BinOp::DeclOp),
             _ => Err("unknown bin op"),
         }
     }
@@ -191,6 +197,8 @@ impl BinOp {
             BinOp::Assign(_op) => OpKind::Assign,
             BinOp::Range(_op) => OpKind::Range,
             BinOp::Access(_op) => OpKind::Access,
+            BinOp::CastOp => OpKind::Cast,
+            BinOp::DeclOp => OpKind::Decl,
         }
     }
 }
@@ -205,6 +213,8 @@ impl fmt::Display for BinOp {
             BinOp::Assign(op) => write!(f, "{}", op.as_str()),
             BinOp::Range(op) => write!(f, "{}", op.as_str()),
             BinOp::Access(op) => write!(f, "{}", op.as_str()),
+            BinOp::CastOp => write!(f, "as"),
+            BinOp::DeclOp => write!(f, ":"),
         }
     }
 }
