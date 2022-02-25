@@ -56,7 +56,7 @@ pub enum Token<'i> {
     Comment(&'i str),
     Keyword(Keyword),
     Punctuation(Punctuation),
-    Group(GroupType, Vec<Token<'i>>),
+    TokenTree(TreeType, Vec<Token<'i>>),
     Unknown(char),
     Error(TokenError),
 }
@@ -83,7 +83,7 @@ impl<'i> Token<'i> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum GroupType {
+pub enum TreeType {
     Paren,
     Square,
     Bracket,

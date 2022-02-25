@@ -1,7 +1,7 @@
 use std::{borrow::Cow, str::Chars};
 
 use crate::ast::{Ident, Keyword, Literal, Punctuation};
-use crate::token::{GroupType, Location, Token, TokenError};
+use crate::token::{TreeType, Location, Token, TokenError};
 
 #[derive(Clone)]
 pub struct Tokenizer<'i> {
@@ -87,7 +87,7 @@ impl<'i> Tokenizer<'i> {
 
                         // parser group
                         if matches!(c, '(' | '[' | '{') {
-                            return self.eat_group();
+                            return self.eat_tree();
                         }
 
                         let token = match c {
@@ -309,14 +309,14 @@ impl<'i> Tokenizer<'i> {
         Err(Token::Eof)
     }
 
-    fn eat_group(&mut self) -> Token<'i> {
+    fn eat_tree(&mut self) -> Token<'i> {
         let mut group = Vec::new();
 
         let close = match self.next_char().unwrap() {
-            '(' => (GroupType::Paren, Token::Punctuation(Punctuation::RParen)),
-            '[' => (GroupType::Square, Token::Punctuation(Punctuation::RSquare)),
+            '(' => (TreeType::Paren, Token::Punctuation(Punctuation::RParen)),
+            '[' => (TreeType::Square, Token::Punctuation(Punctuation::RSquare)),
             '{' => (
-                GroupType::Bracket,
+                TreeType::Bracket,
                 Token::Punctuation(Punctuation::RBracket),
             ),
             _ => unreachable!(),
@@ -329,7 +329,7 @@ impl<'i> Tokenizer<'i> {
                     return Token::Error(TokenError::new(location, "unclose group"));
                 }
                 t if t == close.1 => {
-                    return Token::Group(close.0, group);
+                    return Token::TokenTree(close.0, group);
                 }
                 t => {
                     group.push(t);
@@ -488,11 +488,11 @@ mod test {
     }
 
     #[test]
-    fn test_tokenizer_group() {
+    fn test_tokenizer_tokentree() {
         let inputs: Vec<&str> = vec!["a[b[c]]", "a[b[c[d[e[f]]]]]", "a(b(c(d(e()))))"];
 
         fn print(token: &Token) {
-            if let Token::Group(ty, group) = token {
+            if let Token::TokenTree(ty, group) = token {
                 for g in group {
                     print!("->");
                     print(g)

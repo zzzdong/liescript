@@ -3,11 +3,11 @@ use std::iter::Peekable;
 
 use crate::ast::nodes::expr::{ArrayExpr, BinOpExpr, Expr, FuncCallExpr, IndexExpr, PrefixOpExpr};
 use crate::ast::nodes::stmt::LetStmt;
-use crate::ast::nodes::{Ast, AstNode};
+use crate::ast::nodes::{Ast, AstNode, PostfixOpExpr};
 use crate::ast::op::{AccessOp, AssignOp, BinOp, BitOp, LogOp, NumOp, OpKind, PostfixOp, PrefixOp};
 use crate::ast::Punctuation;
-use crate::token::{self, Token};
-use crate::tokenizer::{self, StrippedTokenizer, Tokenizer};
+use crate::token::{Token, TreeType};
+use crate::tokenizer::{StrippedTokenizer, Tokenizer};
 
 #[derive(Debug)]
 pub struct ParseError {
@@ -72,7 +72,7 @@ impl Parser {
         let t = tokenizer.next();
         assert_eq!(t, Some(Token::Keyword(crate::ast::Keyword::Let)));
 
-        let var = Self::parse_expr_until(tokenizer, 0, is_eq)?;
+        let var = Self::parse_expr_until(tokenizer, Precedence::Lowest, is_eq)?;
 
         let var = match var {
             Expr::Ident(ident) => (ident.ident(), None),
@@ -101,7 +101,7 @@ impl Parser {
             }
         }
 
-        let expr = Self::parse_expr_until(tokenizer, 0, is_stmt_end)?;
+        let expr = Self::parse_expr_until(tokenizer, Precedence::Lowest, is_stmt_end)?;
 
         match expr {
             Expr::BinOp(BinOpExpr { op, .. }) if op.kind() == crate::ast::op::OpKind::Assign => {
@@ -132,18 +132,18 @@ impl Parser {
     // 5. bin op
     fn parse_expr<'i>(
         tokenizer: &mut Peekable<impl Iterator<Item = Token<'i>>>,
-        prev_priority: u8,
+        prev_precedence: Precedence,
     ) -> Result<Expr, ParseError> {
         fn not(_token: &Token) -> bool {
             false
         }
 
-        Self::parse_expr_until(tokenizer, prev_priority, not)
+        Self::parse_expr_until(tokenizer, prev_precedence, not)
     }
 
     fn parse_expr_until<'i>(
         tokenizer: &mut Peekable<impl Iterator<Item = Token<'i>>>,
-        prev_priority: u8,
+        prev_precedence: Precedence,
         predicate: impl Fn(&Token) -> bool + Copy,
     ) -> Result<Expr, ParseError> {
         if let Some(token) = tokenizer.peek() {
@@ -158,18 +158,18 @@ impl Parser {
             Some(Token::Literal(lit)) => Expr::Literal(lit.into()),
             Some(Token::Ident(ident)) => Expr::Ident(ident.into()),
             // group
-            Some(Token::Group(ty, group)) => {
+            Some(Token::TokenTree(ty, group)) => {
                 let mut tokenizer = StrippedTokenizer::new(group.into_iter()).peekable();
                 match ty {
-                    token::GroupType::Paren => Self::parse_expr(&mut tokenizer, 0)?,
+                    TreeType::Paren => Self::parse_expr(&mut tokenizer, Precedence::Lowest)?,
 
                     // parse block
-                    token::GroupType::Bracket => {
+                    TreeType::Bracket => {
                         unimplemented!();
                     }
 
                     // parse array define
-                    token::GroupType::Square => {
+                    TreeType::Square => {
                         let items = Self::parse_comma_delimited(&mut tokenizer)?;
 
                         Expr::Array(ArrayExpr { items })
@@ -181,9 +181,9 @@ impl Parser {
                     ParseError::new(format!("expect prefix operator, but found {token:?}"))
                 })?;
 
-                let priority = prefix_op_priority(op);
+                let precedence = prefix_op_precedence(op);
 
-                let rhs = Self::parse_expr(tokenizer, priority)?;
+                let rhs = Self::parse_expr(tokenizer, precedence)?;
 
                 Expr::PrefixOp(PrefixOpExpr {
                     op,
@@ -206,13 +206,13 @@ impl Parser {
                     return Ok(lhs);
                 }
 
-                Some(Token::Group(ty, group)) => {
-                    if let Some(Token::Group(ty, group)) = tokenizer.next() {
+                Some(Token::TokenTree(ty, group)) => {
+                    if let Some(Token::TokenTree(ty, group)) = tokenizer.next() {
                         let mut tokenizer = StrippedTokenizer::new((group).into_iter()).peekable();
                         match ty {
                             // Index Expr
-                            token::GroupType::Square => {
-                                let rhs = Self::parse_expr(&mut tokenizer, 0)?;
+                            TreeType::Square => {
+                                let rhs = Self::parse_expr(&mut tokenizer, Precedence::Lowest)?;
                                 lhs = Expr::Index(IndexExpr {
                                     lhs: Box::new(lhs),
                                     rhs: Box::new(rhs),
@@ -220,7 +220,7 @@ impl Parser {
                                 continue;
                             }
                             // func call
-                            token::GroupType::Paren => {
+                            TreeType::Paren => {
                                 let args = Self::parse_comma_delimited(&mut tokenizer)?;
 
                                 lhs = Expr::FuncCall(FuncCallExpr {
@@ -229,19 +229,27 @@ impl Parser {
                                 });
                                 continue;
                             }
-                            token::GroupType::Bracket => {
-                                unimplemented!("token::GroupType::Bracket")
+                            TreeType::Bracket => {
+                                unimplemented!("GroupType::Bracket")
                             }
                         }
                     } else {
                         break;
                     }
                 }
+                Some(Token::Punctuation(op)) if op == &Punctuation::Question => {
+                    tokenizer.next();
+                    lhs = Expr::PostfixOp(PostfixOpExpr {
+                        op: PostfixOp::Try,
+                        lhs: Box::new(lhs),
+                    });
+                    continue;
+                }
                 Some(Token::Punctuation(op)) => {
                     let op = BinOp::from_punctuation(*op).map_err(|_| {
                         ParseError::new(format!("expect binary operator, but found {token:?}"))
                     })?;
-                    match Self::parse_binop(tokenizer, op, prev_priority, lhs.clone(), predicate)? {
+                    match Self::parse_binop(tokenizer, op, prev_precedence, lhs.clone(), predicate)? {
                         Some(expr) => {
                             lhs = expr;
                             continue;
@@ -251,7 +259,7 @@ impl Parser {
                 }
                 Some(Token::Keyword(crate::ast::Keyword::As)) => {
                     let op = BinOp::CastOp;
-                    match Self::parse_binop(tokenizer, op, prev_priority, lhs.clone(), predicate)? {
+                    match Self::parse_binop(tokenizer, op, prev_precedence, lhs.clone(), predicate)? {
                         Some(expr) => {
                             lhs = expr;
                             continue;
@@ -277,19 +285,19 @@ impl Parser {
     fn parse_binop<'i>(
         tokenizer: &mut Peekable<impl Iterator<Item = Token<'i>>>,
         op: BinOp,
-        prev_priority: u8,
+        prev_precedence: Precedence,
         lhs: Expr,
         predicate: impl Fn(&Token) -> bool + Copy,
     ) -> Result<Option<Expr>, ParseError> {
-        let priority = binary_op_priority(op);
+        let precedence = binary_op_precedence(op);
 
-        if prev_priority >= priority {
+        if prev_precedence >= precedence {
             Ok(None)
         } else {
             let op = op.clone();
             tokenizer.next();
 
-            let rhs = Self::parse_expr_until(tokenizer, priority, predicate)?;
+            let rhs = Self::parse_expr_until(tokenizer, precedence, predicate)?;
             let lhs = Expr::BinOp(BinOpExpr {
                 op,
                 lhs: Box::new(lhs),
@@ -306,7 +314,7 @@ impl Parser {
         let mut items = Vec::new();
 
         loop {
-            let item = Self::parse_expr_until(tokenizer, 0, is_comma)?;
+            let item = Self::parse_expr_until(tokenizer, Precedence::Lowest, is_comma)?;
 
             if item == Expr::Eof {
                 break;
@@ -338,34 +346,57 @@ impl Parser {
 
 /// https://doc.rust-lang.org/reference/expressions.html#expression-precedence
 
-fn prefix_op_priority(op: PrefixOp) -> u8 {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(u8)]
+enum Precedence {
+    Lowest = 0,
+    Assign,
+    Range,
+    LogicOr,
+    LogicAnd,
+    Equal,
+    Compare,
+    BitOr,
+    BitXor,
+    BitAnd,
+    BitShift,
+    Term,
+    Factor,
+    As,
+    Prefix,
+    Postfix,
+    Call,
+    Path,
+}
+
+fn prefix_op_precedence(op: PrefixOp) -> Precedence {
     match op {
-        PrefixOp::Neg | PrefixOp::Not => 90,
+        PrefixOp::Neg | PrefixOp::Not => Precedence::Prefix,
     }
 }
 
-fn postfix_op_priority(op: PostfixOp) -> u8 {
+fn postfix_op_precedence(op: PostfixOp) -> Precedence {
     match op {
-        PostfixOp::Question => 100,
+        PostfixOp::Try => Precedence::Postfix,
     }
 }
 
-fn binary_op_priority(op: BinOp) -> u8 {
+fn binary_op_precedence(op: BinOp) -> Precedence {
     match op {
-        BinOp::Assign(_) => 10,
-        BinOp::Range(_) => 20,
-        BinOp::Log(LogOp::Or) => 30,
-        BinOp::Log(LogOp::And) => 31,
-        BinOp::Comp(_) => 40,
-        BinOp::Bit(BitOp::Or) => 50,
-        BinOp::Bit(BitOp::And) => 51,
-        BinOp::Bit(BitOp::Xor) => 52,
-        BinOp::Bit(_) => 53, // <<  >>
-        BinOp::Num(NumOp::Add) | BinOp::Num(NumOp::Sub) => 60,
-        BinOp::Num(NumOp::Mul) | BinOp::Num(NumOp::Div) | BinOp::Num(NumOp::Mod) => 61,
-        BinOp::CastOp | BinOp::DeclOp => 70,
-        BinOp::Access(AccessOp::Field) => 110,
-        BinOp::Access(AccessOp::Path) => 120,
+        BinOp::Assign(_) => Precedence::As,
+        BinOp::Range(_) => Precedence::Range,
+        BinOp::Log(LogOp::Or) => Precedence::LogicOr,
+        BinOp::Log(LogOp::And) => Precedence::LogicAnd,
+        BinOp::Comp(_) => Precedence::Compare,
+        BinOp::Bit(BitOp::Or) => Precedence::BitOr,
+        BinOp::Bit(BitOp::Xor) => Precedence::BitXor,
+        BinOp::Bit(BitOp::And) => Precedence::BitAnd,
+        BinOp::Bit(_) => Precedence::BitShift, // <<  >>
+        BinOp::Num(NumOp::Add) | BinOp::Num(NumOp::Sub) => Precedence::Term,
+        BinOp::Num(NumOp::Mul) | BinOp::Num(NumOp::Div) | BinOp::Num(NumOp::Mod) => Precedence::Factor,
+        BinOp::CastOp | BinOp::DeclOp => Precedence::As,
+        BinOp::Access(AccessOp::Field) => Precedence::Call,
+        BinOp::Access(AccessOp::Path) => Precedence::Path,
     }
 }
 
@@ -376,7 +407,7 @@ mod test {
     #[test]
     fn test_parse_expr() {
         let inputs = [
-            "a+b-c*d",
+            "a?+b-c*d",
             "a*b-c+d",
             "a*b/c%d",
             "a-b*c+d",
@@ -401,7 +432,7 @@ mod test {
 
             println!("{}=>", input);
 
-            let ret = Parser::parse_expr(&mut tokenizer, 0).unwrap();
+            let ret = Parser::parse_expr(&mut tokenizer, Precedence::Lowest).unwrap();
 
             println!("{}", ret);
 
@@ -426,7 +457,7 @@ mod test {
 
             let mut tokenizer = tokenizer.peekable();
 
-            let ret = Parser::parse_expr(&mut tokenizer, 0).unwrap();
+            let ret = Parser::parse_expr(&mut tokenizer, Precedence::Lowest).unwrap();
 
             print!("{ret}:\n");
 
@@ -442,7 +473,7 @@ mod test {
             let tokenizer = Tokenizer::new("", input).stripped();
             let mut tokenizer = tokenizer.peekable();
 
-            let ret = Parser::parse_expr(&mut tokenizer, 0).unwrap();
+            let ret = Parser::parse_expr(&mut tokenizer, Precedence::Lowest).unwrap();
 
             print!("=> {ret:?}:\n");
         }

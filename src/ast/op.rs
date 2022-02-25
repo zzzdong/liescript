@@ -66,7 +66,7 @@ define_op!(PrefixOp,
 );
 
 define_op!(PostfixOp,
-    "?" => (Question, Question),
+    "?" => (Try, Question),
 );
 
 define_op!(NumOp,
