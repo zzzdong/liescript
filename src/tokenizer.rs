@@ -1,7 +1,7 @@
 use std::{borrow::Cow, str::Chars};
 
 use crate::ast::{Ident, Keyword, Literal, Punctuation};
-use crate::token::{TreeType, Location, Token, TokenError};
+use crate::token::{Location, Token, TokenError, TreeType};
 
 #[derive(Clone)]
 pub struct Tokenizer<'i> {
@@ -85,7 +85,7 @@ impl<'i> Tokenizer<'i> {
                             }
                         }
 
-                        // parser group
+                        // parser tree
                         if matches!(c, '(' | '[' | '{') {
                             return self.eat_tree();
                         }
@@ -315,10 +315,7 @@ impl<'i> Tokenizer<'i> {
         let close = match self.next_char().unwrap() {
             '(' => (TreeType::Paren, Token::Punctuation(Punctuation::RParen)),
             '[' => (TreeType::Square, Token::Punctuation(Punctuation::RSquare)),
-            '{' => (
-                TreeType::Bracket,
-                Token::Punctuation(Punctuation::RBracket),
-            ),
+            '{' => (TreeType::Bracket, Token::Punctuation(Punctuation::RBracket)),
             _ => unreachable!(),
         };
 

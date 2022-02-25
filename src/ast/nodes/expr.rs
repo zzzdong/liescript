@@ -228,14 +228,6 @@ impl fmt::Display for Expr {
     }
 }
 
-fn write_ident(level: usize, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    for _i in 0..level * LEVEL_INDENT {
-        write!(f, "")?;
-    }
-
-    Ok(())
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct BlockExpr {
     pub block: Vec<AstNode>,

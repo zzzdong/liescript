@@ -66,6 +66,32 @@ impl Parser {
         return Ok(ast);
     }
 
+    fn parse_block<'i>(
+        tokenizer: &mut Peekable<impl Iterator<Item = Token<'i>>>,
+    ) -> Result<Vec<AstNode>, ParseError> {
+        let mut nodes = Vec::new();
+
+        loop {
+            let token = tokenizer.peek();
+
+            match token {
+                Some(Token::Keyword(crate::ast::Keyword::Let)) => {
+                    let let_stmt = Self::parse_let_stmt(tokenizer)?;
+                    nodes.push(AstNode::Let(let_stmt));
+                }
+                Some(t) => {
+                    return Err(ParseError::new("unknown token {t:?}"));
+                }
+                None => {
+                    break;
+                }
+            }
+        }
+
+        Ok(nodes)
+    }
+
+
     fn parse_let_stmt<'i>(
         tokenizer: &mut Peekable<impl Iterator<Item = Token<'i>>>,
     ) -> Result<LetStmt, ParseError> {
@@ -249,7 +275,8 @@ impl Parser {
                     let op = BinOp::from_punctuation(*op).map_err(|_| {
                         ParseError::new(format!("expect binary operator, but found {token:?}"))
                     })?;
-                    match Self::parse_binop(tokenizer, op, prev_precedence, lhs.clone(), predicate)? {
+                    match Self::parse_binop(tokenizer, op, prev_precedence, lhs.clone(), predicate)?
+                    {
                         Some(expr) => {
                             lhs = expr;
                             continue;
@@ -259,7 +286,8 @@ impl Parser {
                 }
                 Some(Token::Keyword(crate::ast::Keyword::As)) => {
                     let op = BinOp::CastOp;
-                    match Self::parse_binop(tokenizer, op, prev_precedence, lhs.clone(), predicate)? {
+                    match Self::parse_binop(tokenizer, op, prev_precedence, lhs.clone(), predicate)?
+                    {
                         Some(expr) => {
                             lhs = expr;
                             continue;
@@ -393,10 +421,83 @@ fn binary_op_precedence(op: BinOp) -> Precedence {
         BinOp::Bit(BitOp::And) => Precedence::BitAnd,
         BinOp::Bit(_) => Precedence::BitShift, // <<  >>
         BinOp::Num(NumOp::Add) | BinOp::Num(NumOp::Sub) => Precedence::Term,
-        BinOp::Num(NumOp::Mul) | BinOp::Num(NumOp::Div) | BinOp::Num(NumOp::Mod) => Precedence::Factor,
+        BinOp::Num(NumOp::Mul) | BinOp::Num(NumOp::Div) | BinOp::Num(NumOp::Mod) => {
+            Precedence::Factor
+        }
         BinOp::CastOp | BinOp::DeclOp => Precedence::As,
         BinOp::Access(AccessOp::Field) => Precedence::Call,
         BinOp::Access(AccessOp::Path) => Precedence::Path,
+    }
+}
+
+trait AstParser {
+    type Item;
+
+    fn parse<'i>(
+        tokenizer: &mut Peekable<impl Iterator<Item = Token<'i>>>,
+    ) -> Result<Self::Item, ParseError>;
+}
+
+impl AstParser for LetStmt {
+    type Item = LetStmt;
+
+    fn parse<'i>(
+        tokenizer: &mut Peekable<impl Iterator<Item = Token<'i>>>,
+    ) -> Result<Self::Item, ParseError> {
+        let t = tokenizer.next();
+        assert_eq!(t, Some(Token::Keyword(crate::ast::Keyword::Let)));
+
+        let var = Parser::parse_expr_until(tokenizer, Precedence::Lowest, is_eq)?;
+
+        let var = match var {
+            Expr::Ident(ident) => (ident.ident(), None),
+            Expr::BinOp(BinOpExpr { op, lhs, rhs }) if op.kind() == OpKind::Decl => {
+                if let Expr::Ident(lident) = lhs.as_ref() {
+                    if let Expr::Ident(rident) = rhs.as_ref() {
+                        (lident.clone().ident(), Some(rident.clone().ident()))
+                    } else {
+                        return Err(ParseError::new(format!("expect decl, but found {rhs:?}")));
+                    }
+                } else {
+                    return Err(ParseError::new(format!("expect var, but found {lhs:?}")));
+                }
+            }
+            _ => {
+                return Err(ParseError::new(format!(
+                    "expect var decl, but found {var:?}"
+                )));
+            }
+        };
+
+        match tokenizer.next() {
+            Some(Token::Punctuation(Punctuation::Eq)) => {}
+            t => {
+                return Err(ParseError::new(format!("expect `=`, but found {t:?}")));
+            }
+        }
+
+        let expr = Parser::parse_expr_until(tokenizer, Precedence::Lowest, is_stmt_end)?;
+
+        match expr {
+            Expr::BinOp(BinOpExpr { op, .. }) if op.kind() == crate::ast::op::OpKind::Assign => {
+                return Err(ParseError::new(format!(
+                    "assign expr is not supported in let stmt"
+                )));
+            }
+            // TODO, need to check the return value when if expr or block expr
+            _ => {}
+        };
+
+        assert_eq!(
+            tokenizer.next(),
+            Some(Token::Punctuation(Punctuation::Semicolon))
+        );
+
+        Ok(LetStmt {
+            var: var.0,
+            decl: var.1,
+            expr,
+        })
     }
 }
 
