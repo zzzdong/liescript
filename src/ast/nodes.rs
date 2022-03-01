@@ -24,8 +24,10 @@ impl Ast {
 pub enum AstNode {
     Import(ImportStmt),
     Let(LetStmt),
+    If(IfStmt),
     StructDef(StructDefStmt),
     FuncDef(FuncDefStmt),
     While(WhileStmt),
+    ExprStmt(Expr),
     Expression(Expr),
 }

@@ -313,9 +313,9 @@ impl<'i> Tokenizer<'i> {
         let mut group = Vec::new();
 
         let close = match self.next_char().unwrap() {
-            '(' => (TreeType::Paren, Token::Punctuation(Punctuation::RParen)),
-            '[' => (TreeType::Square, Token::Punctuation(Punctuation::RSquare)),
-            '{' => (TreeType::Bracket, Token::Punctuation(Punctuation::RBracket)),
+            '(' => (TreeType::Group, Token::Punctuation(Punctuation::RParen)),
+            '[' => (TreeType::Array, Token::Punctuation(Punctuation::RSquare)),
+            '{' => (TreeType::Block, Token::Punctuation(Punctuation::RBracket)),
             _ => unreachable!(),
         };
 

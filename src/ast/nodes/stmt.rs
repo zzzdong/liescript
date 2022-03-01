@@ -27,7 +27,7 @@ pub struct WhileStmt {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Ifstmt {
+pub struct IfStmt {
     pub condition: Expr,
     pub block: BlockExpr,
 }

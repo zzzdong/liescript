@@ -84,7 +84,7 @@ impl<'i> Token<'i> {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TreeType {
-    Paren,
-    Square,
-    Bracket,
+    Group,
+    Array,
+    Block,
 }

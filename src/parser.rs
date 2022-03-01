@@ -2,10 +2,10 @@ use std::borrow::Cow;
 use std::iter::Peekable;
 
 use crate::ast::nodes::expr::{ArrayExpr, BinOpExpr, Expr, FuncCallExpr, IndexExpr, PrefixOpExpr};
-use crate::ast::nodes::stmt::LetStmt;
-use crate::ast::nodes::{Ast, AstNode, PostfixOpExpr};
+use crate::ast::nodes::stmt::{IfStmt, LetStmt};
+use crate::ast::nodes::{Ast, AstNode, BlockExpr, PostfixOpExpr};
 use crate::ast::op::{AccessOp, AssignOp, BinOp, BitOp, LogOp, NumOp, OpKind, PostfixOp, PrefixOp};
-use crate::ast::Punctuation;
+use crate::ast::{Keyword, Punctuation};
 use crate::token::{Token, TreeType};
 use crate::tokenizer::{StrippedTokenizer, Tokenizer};
 
@@ -38,6 +38,15 @@ fn is_comma(token: &Token) -> bool {
     token == &Token::Punctuation(Punctuation::Comma)
 }
 
+fn is_block(token: &Token) -> bool {
+    if let Token::TokenTree(ty, _) = token {
+        if ty == &TreeType::Block {
+            return true;
+        }
+    }
+    false
+}
+
 pub struct Parser {}
 
 impl Parser {
@@ -50,8 +59,8 @@ impl Parser {
             let token = tokenizer.peek();
 
             match token {
-                Some(Token::Keyword(crate::ast::Keyword::Let)) => {
-                    let let_stmt = Self::parse_let_stmt(&mut tokenizer)?;
+                Some(Token::Keyword(Keyword::Let)) => {
+                    let let_stmt = LetStmt::parse(&mut tokenizer)?;
                     ast.children.push(AstNode::Let(let_stmt));
                 }
                 Some(t) => {
@@ -66,6 +75,25 @@ impl Parser {
         return Ok(ast);
     }
 
+    fn parse_top_level<'i>(
+        tokenizer: &mut Peekable<impl Iterator<Item = Token<'i>>>,
+    ) -> Result<AstNode, ParseError> {
+        let token = tokenizer.peek();
+
+        match token {
+            Some(Token::Keyword(Keyword::Let)) => {
+                LetStmt::parse(&mut tokenizer).map(|s| AstNode::Let(s))
+            }
+            Some(Token::Keyword(Keyword::If)) => {
+                IfStmt::parse(&mut tokenizer).map(|s| AstNode::If(s))
+            }
+            Some(t) => {
+                return Err(ParseError::new("unknown token {t:?}"));
+            }
+            None => {}
+        }
+    }
+
     fn parse_block<'i>(
         tokenizer: &mut Peekable<impl Iterator<Item = Token<'i>>>,
     ) -> Result<Vec<AstNode>, ParseError> {
@@ -75,7 +103,7 @@ impl Parser {
             let token = tokenizer.peek();
 
             match token {
-                Some(Token::Keyword(crate::ast::Keyword::Let)) => {
+                Some(Token::Keyword(Keyword::Let)) => {
                     let let_stmt = Self::parse_let_stmt(tokenizer)?;
                     nodes.push(AstNode::Let(let_stmt));
                 }
@@ -91,12 +119,11 @@ impl Parser {
         Ok(nodes)
     }
 
-
     fn parse_let_stmt<'i>(
         tokenizer: &mut Peekable<impl Iterator<Item = Token<'i>>>,
     ) -> Result<LetStmt, ParseError> {
         let t = tokenizer.next();
-        assert_eq!(t, Some(Token::Keyword(crate::ast::Keyword::Let)));
+        assert_eq!(t, Some(Token::Keyword(Keyword::Let)));
 
         let var = Self::parse_expr_until(tokenizer, Precedence::Lowest, is_eq)?;
 
@@ -187,18 +214,17 @@ impl Parser {
             Some(Token::TokenTree(ty, group)) => {
                 let mut tokenizer = StrippedTokenizer::new(group.into_iter()).peekable();
                 match ty {
-                    TreeType::Paren => Self::parse_expr(&mut tokenizer, Precedence::Lowest)?,
-
-                    // parse block
-                    TreeType::Bracket => {
-                        unimplemented!();
-                    }
-
+                    TreeType::Group => Self::parse_expr(&mut tokenizer, Precedence::Lowest)?,
                     // parse array define
-                    TreeType::Square => {
+                    TreeType::Array => {
                         let items = Self::parse_comma_delimited(&mut tokenizer)?;
 
                         Expr::Array(ArrayExpr { items })
+                    }
+                    // parse block
+                    TreeType::Block => {
+                        unimplemented!();
+                        return Ok(block);
                     }
                 }
             }
@@ -232,12 +258,12 @@ impl Parser {
                     return Ok(lhs);
                 }
 
-                Some(Token::TokenTree(ty, group)) => {
-                    if let Some(Token::TokenTree(ty, group)) = tokenizer.next() {
-                        let mut tokenizer = StrippedTokenizer::new((group).into_iter()).peekable();
+                Some(Token::TokenTree(ty, tree)) => {
+                    if let Some(Token::TokenTree(ty, tree)) = tokenizer.next() {
+                        let mut tokenizer = StrippedTokenizer::new((tree).into_iter()).peekable();
                         match ty {
                             // Index Expr
-                            TreeType::Square => {
+                            TreeType::Array => {
                                 let rhs = Self::parse_expr(&mut tokenizer, Precedence::Lowest)?;
                                 lhs = Expr::Index(IndexExpr {
                                     lhs: Box::new(lhs),
@@ -246,7 +272,7 @@ impl Parser {
                                 continue;
                             }
                             // func call
-                            TreeType::Paren => {
+                            TreeType::Group => {
                                 let args = Self::parse_comma_delimited(&mut tokenizer)?;
 
                                 lhs = Expr::FuncCall(FuncCallExpr {
@@ -255,7 +281,7 @@ impl Parser {
                                 });
                                 continue;
                             }
-                            TreeType::Bracket => {
+                            TreeType::Block => {
                                 unimplemented!("GroupType::Bracket")
                             }
                         }
@@ -284,7 +310,7 @@ impl Parser {
                         None => break,
                     }
                 }
-                Some(Token::Keyword(crate::ast::Keyword::As)) => {
+                Some(Token::Keyword(Keyword::As)) => {
                     let op = BinOp::CastOp;
                     match Self::parse_binop(tokenizer, op, prev_precedence, lhs.clone(), predicate)?
                     {
@@ -445,7 +471,7 @@ impl AstParser for LetStmt {
         tokenizer: &mut Peekable<impl Iterator<Item = Token<'i>>>,
     ) -> Result<Self::Item, ParseError> {
         let t = tokenizer.next();
-        assert_eq!(t, Some(Token::Keyword(crate::ast::Keyword::Let)));
+        assert_eq!(t, Some(Token::Keyword(Keyword::Let)));
 
         let var = Parser::parse_expr_until(tokenizer, Precedence::Lowest, is_eq)?;
 
@@ -498,6 +524,48 @@ impl AstParser for LetStmt {
             decl: var.1,
             expr,
         })
+    }
+}
+
+impl AstParser for IfStmt {
+    type Item = IfStmt;
+
+    fn parse<'i>(
+        tokenizer: &mut Peekable<impl Iterator<Item = Token<'i>>>,
+    ) -> Result<Self::Item, ParseError> {
+        let t = tokenizer.next();
+        assert_eq!(t, Some(Token::Keyword(Keyword::If)));
+
+        let condition = Parser::parse_expr_until(tokenizer, Precedence::Lowest, is_block)?;
+
+        let block = match tokenizer.next() {
+            Some(Token::TokenTree(ty, tree)) => {
+                let mut tokenizer = StrippedTokenizer::new((tree).into_iter()).peekable();
+
+                BlockExpr::parse(&mut tokenizer)?
+            }
+            t => {
+                return Err(ParseError::new(format!("expect block, but found {t:?}")));
+            }
+        };
+
+        Ok(IfStmt { condition, block })
+    }
+}
+
+impl AstParser for BlockExpr {
+    type Item = BlockExpr;
+    // let, if, while, loop statment,
+    // express statment, express.
+    fn parse<'i>(
+        tokenizer: &mut Peekable<impl Iterator<Item = Token<'i>>>,
+    ) -> Result<Self::Item, ParseError> {
+        let mut block = Vec::new();
+
+        loop {}
+
+        unimplemented!();
+        Ok(BlockExpr{block})
     }
 }
 
