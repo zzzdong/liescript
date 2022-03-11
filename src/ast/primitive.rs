@@ -39,7 +39,7 @@ macro_rules! define_primitive {
                 }
             }
 
-            pub fn from_ident(ident: &super::Ident) -> Option<Self> {
+            pub fn from_ident(ident: &crate::token::Ident) -> Option<Self> {
                 match ident.as_str() {
                     $($str => Some(Primitive::$name),)*
                     _ => None,

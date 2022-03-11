@@ -1,6 +1,6 @@
 use std::fmt;
 
-use super::punctuation::Punctuation;
+use crate::token::Punctuation;
 
 macro_rules! define_op {
     (

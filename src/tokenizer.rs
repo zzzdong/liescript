@@ -1,6 +1,7 @@
+use std::fmt;
 use std::{borrow::Cow, str::Chars};
 
-use crate::ast::{Ident, Keyword, Literal, Punctuation};
+use crate::token::{Ident, Keyword, Literal, Punctuation};
 use crate::token::{Location, Token, TokenError, TreeType};
 
 #[derive(Clone)]
@@ -338,6 +339,15 @@ impl<'i> Tokenizer<'i> {
     pub fn stripped(self) -> StrippedTokenizer<'i, Tokenizer<'i>> {
         let a = self.into_iter();
         StrippedTokenizer::new(a)
+    }
+}
+
+impl<'i> fmt::Debug for Tokenizer<'i> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Tokenizer")
+            .field("input", &self.input)
+            .field("filename", &self.filename)
+            .finish()
     }
 }
 

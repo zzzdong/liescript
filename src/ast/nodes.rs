@@ -1,13 +1,13 @@
-pub mod expr;
+// pub mod expr;
 pub mod stmt;
 
-pub use expr::*;
+// pub use expr::*;
 pub use stmt::*;
 
-use self::expr::Expr;
-use self::stmt::{FuncDefStmt, ImportStmt, LetStmt, StructDefStmt, WhileStmt};
+// use self::expr::Expr;
+// use self::stmt::{FuncDefStmt, ImportStmt, LetStmt, StructDefStmt, WhileStmt};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Ast {
     pub children: Vec<AstNode>,
 }
@@ -20,14 +20,7 @@ impl Ast {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum AstNode {
-    Import(ImportStmt),
-    Let(LetStmt),
-    If(IfStmt),
-    StructDef(StructDefStmt),
-    FuncDef(FuncDefStmt),
-    While(WhileStmt),
-    ExprStmt(Expr),
-    Expression(Expr),
+    Statement(Statement),
 }
