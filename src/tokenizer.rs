@@ -362,19 +362,19 @@ impl<'i> Iterator for Tokenizer<'i> {
     }
 }
 
-#[derive(Clone)]
-pub struct StrippedTokenizer<'i, I: IntoIterator<Item = Token<'i>>> {
+#[derive(Clone, Debug)]
+pub struct StrippedTokenizer<'i, I: Iterator<Item = Token<'i>>> {
     iter: I,
 }
 
-impl<'i, I: IntoIterator<Item = Token<'i>>> StrippedTokenizer<'i, I> {
+impl<'i, I: Iterator<Item = Token<'i>>> StrippedTokenizer<'i, I> {
     pub fn with_input(filename: &str, input: &'i str) -> StrippedTokenizer<'i, Tokenizer<'i>> {
         let iter = Tokenizer::new(filename, input);
         StrippedTokenizer::new(iter)
     }
 
     pub fn new(iter: I) -> Self {
-        StrippedTokenizer { iter }
+        StrippedTokenizer { iter: iter }
     }
 
     pub fn from_iter(iter: I) -> Self {

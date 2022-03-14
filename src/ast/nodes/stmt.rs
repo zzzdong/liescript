@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use crate::token::Ident;
 
 #[derive(Debug, Clone)]
@@ -15,8 +17,47 @@ pub enum Item {
 
 #[derive(Debug, Clone)]
 pub struct ImportStmt {
+    pub items: Vec<ImportItem>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ImportItem {
     pub path: Vec<PathSegment>,
     pub alias: Option<Ident>,
+}
+
+#[derive(Debug, Clone)]
+pub struct UseTree {
+    pub path: Vec<PathSegment>,
+    pub alias: Option<Ident>,
+    pub children: Vec<UseTree>,
+}
+
+impl UseTree {
+    pub fn flat(self) -> Vec<ImportItem> {
+        let mut ret = Vec::new();
+
+        if self.children.is_empty() {
+            ret.push(ImportItem {
+                path: self.path,
+                alias: self.alias,
+            });
+            return ret;
+        }
+
+        let UseTree { path, children, .. } = self;
+
+        for child in children {
+            for mut c in child.flat() {
+                let mut x = path.clone();
+                x.extend(c.path);
+                c.path = x;
+                ret.push(c);
+            }
+        }
+
+        ret
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -25,6 +66,17 @@ pub enum PathSegment {
     PathSuper,
     PathSelf,
     PathCrate,
+}
+
+impl Display for PathSegment {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Ident(ident) => write!(f, "{ident:?}"),
+            Self::PathSuper => write!(f, "super"),
+            Self::PathSelf => write!(f, "self"),
+            Self::PathCrate => write!(f, "crate"),
+        }
+    }
 }
 
 // #[derive(Debug, Clone, PartialEq)]

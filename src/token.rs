@@ -47,7 +47,13 @@ impl PartialEq for TokenError {
     }
 }
 
-#[derive(Debug, PartialEq)]
+impl Clone for TokenError {
+    fn clone(&self) -> Self {
+        unreachable!()
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
 pub enum Token<'i> {
     Eof,
     Whitespace(&'i str),
