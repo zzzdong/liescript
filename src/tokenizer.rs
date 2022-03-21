@@ -1,48 +1,50 @@
-use std::fmt;
-use std::{borrow::Cow, str::Chars};
+use std::fmt::{self};
+use std::slice;
+use std::str::Chars;
 
-use crate::token::{Ident, Keyword, Literal, Punctuation};
-use crate::token::{Location, Token, TokenError, TreeType};
+use crate::token::{Ident, Keyword, LineCol, Literal, Span, Symbol, Token};
+use crate::token::{TokenError, TokenKind};
 
 #[derive(Clone)]
 pub struct Tokenizer<'i> {
     chars: Chars<'i>,
     input: &'i str,
-    filename: String,
-    position: usize,
+    filename: &'i str,
+    offset: usize,
+    location: LineCol,
 }
 
 impl<'i> Tokenizer<'i> {
-    pub fn new(filename: &str, input: &'i str) -> Self {
+    pub fn new(filename: &'i str, input: &'i str) -> Self {
         let chars = input.chars();
 
         Tokenizer {
             chars,
-            filename: filename.to_string(),
-            position: 0,
+            filename,
+            offset: 0,
             input,
+            location: LineCol::new(),
         }
     }
 
-    fn location(&self, pos: usize) -> Location {
-        let mut line = 1;
-        let mut column = 1;
-
-        let mut chars = self.input.chars();
-
-        for i in 0..=pos {
-            if let Some('\n') = chars.next() {
-                line += 1;
-                column = 1;
-            }
-
-            column += 1;
-        }
-
-        Location::new(&self.filename, line, column)
+    fn location(&self) -> (usize, LineCol) {
+        (self.offset, self.location)
     }
 
-    pub fn next_token(&mut self) -> Token<'i> {
+    fn new_token(&self, start: (usize, LineCol), kind: TokenKind) -> Token {
+        let span = Span::new(start.1, self.location);
+
+        Token { span, kind }
+    }
+
+    pub fn next_token(&mut self) -> Result<Token, TokenError> {
+        let start = self.location();
+
+        self.next_token_kind()
+            .map(|kind| self.new_token(start, kind))
+    }
+
+    fn next_token_kind(&mut self) -> Result<TokenKind, TokenError> {
         match self.peek() {
             Some(c) => {
                 match c {
@@ -51,75 +53,21 @@ impl<'i> Tokenizer<'i> {
                     '0'..='9' => self.eat_number(),
                     '\'' => self.eat_char(),
                     '"' => self.eat_string(),
-                    _ => {
-                        if self.has_at_lease(3) {
-                            let pat = &self.chars.clone().as_str()[..3];
-                            if pat == "..=" {
-                                self.advance(3);
-                                return Token::Punctuation(Punctuation::DotDotEq);
-                            }
+                    c => {
+                        // comment
+                        if self.starts_with("//") {
+                            return self.eat_comment();
                         }
-                        // try 2 byte
-                        if self.has_at_lease(2) {
-                            let pat = &self.chars.clone().as_str()[..2];
-                            let token = match pat {
-                                // comment
-                                "//" => {
-                                    return self.eat_comment();
-                                }
-                                // logic op
-                                "&&" | "||" |
-                                // assign
-                                "+=" | "-=" | "*=" | "/=" | "%=" | "^=" | "&=" | "|=" |
-                                // compare op
-                                "==" | "!=" | ">=" | "<=" |
-                                // others
-                                "::" | "->" | ".." => {
-                                    Punctuation::from_str(pat).ok().map(Token::Punctuation)
-                                }
-                                _ => None,
-                            };
-
-                            if let Some(t) = token {
-                                self.advance(2);
-                                return t;
-                            }
-                        }
-
                         // parser tree
                         if matches!(c, '(' | '[' | '{') {
                             return self.eat_tree();
                         }
-
-                        let token = match c {
-                            // brackets
-                            '(' | ')' | '[' | ']' | '{' | '}' |
-                            // num op
-                            '+' | '-' | '*' | '/' | '%' | '^' |
-                            // compare op
-                            '>' | '<' |
-                            // others
-                            ',' | ':' | ';' | '#' | '!' | '?' | '&' | '=' | '.' => {
-                                let mut tmp = [0u8; 4];
-                                Punctuation::from_str(c.encode_utf8(&mut tmp)).ok().map(Token::Punctuation)
-                            }
-                            _ => None,
-                        };
-
-                        if let Some(t) = token {
-                            self.advance(1);
-                            return t;
-                        }
-
-                        dbg!(c, self.location(self.position));
-
-                        self.advance(1);
-
-                        Token::Unknown(c)
+                        // symbol
+                        self.eat_symbol(c)
                     }
                 }
             }
-            None => Token::Eof,
+            None => Ok(TokenKind::Eof),
         }
     }
 
@@ -131,13 +79,21 @@ impl<'i> Tokenizer<'i> {
         self.chars.clone().nth(n - 1).is_some()
     }
 
+    fn starts_with(&self, pat: &str) -> bool {
+        self.chars.clone().as_str().starts_with(pat)
+    }
+
     pub fn is_eof(&mut self) -> bool {
         self.peek().is_none()
     }
 
     fn next_char(&mut self) -> Option<char> {
         self.chars.next().map(|c| {
-            self.position += 1;
+            self.offset += c.len_utf8();
+            if c == '\n' {
+                self.location.line += 1;
+                self.location.column = 1;
+            }
             c
         })
     }
@@ -158,7 +114,16 @@ impl<'i> Tokenizer<'i> {
     where
         P: FnMut(char) -> bool,
     {
-        // let mut ret = String::new();
+        // let start = self.offset;
+        // while let Some(ch) = self.peek() {
+        //     if !predicate(ch) {
+        //         break;
+        //     }
+
+        //     self.advance(1);
+        // }
+
+        // &self.input[start..self.offset]
 
         let start = self.chars.as_str();
         let mut len = 0;
@@ -176,28 +141,30 @@ impl<'i> Tokenizer<'i> {
         &start[..len]
     }
 
-    pub fn eat_whitespace(&mut self) -> Token<'i> {
+    pub fn eat_whitespace(&mut self) -> Result<TokenKind, TokenError> {
         let ws = self.eat_while(|c| c.is_whitespace());
 
-        Token::Whitespace(ws)
+        Ok(TokenKind::Whitespace)
     }
 
-    pub fn eat_ident(&mut self) -> Token<'i> {
+    pub fn eat_ident(&mut self) -> Result<TokenKind, TokenError> {
         let got = self.eat_while(|c| c.is_ascii_alphanumeric() || c == '_');
 
-        match got {
-            "true" => Token::Literal(Literal::Bool(true)),
-            "false" => Token::Literal(Literal::Bool(false)),
+        let token = match got {
+            "true" => TokenKind::Literal(Literal::Bool(true)),
+            "false" => TokenKind::Literal(Literal::Bool(false)),
             kw if Keyword::STRS.contains(&kw) => {
                 let kw = Keyword::from_str(kw);
-                Token::Keyword(kw)
+                TokenKind::Keyword(kw)
             }
-            _ => Token::Ident(Ident::new(got)),
-        }
+            _ => TokenKind::Ident(Ident::new(got)),
+        };
+
+        Ok(token)
     }
 
-    fn eat_number(&mut self) -> Token<'i> {
-        let start = self.position;
+    fn eat_number(&mut self) -> Result<TokenKind, TokenError> {
+        let start = self.offset;
         let mut is_float = false;
 
         let num = self.eat_while(|c| {
@@ -210,58 +177,46 @@ impl<'i> Tokenizer<'i> {
         });
 
         if is_float {
-            match num.parse::<f64>() {
-                Ok(i) => Token::float(i),
-                Err(e) => Token::Error(
-                    TokenError::new(self.location(start), "parse float failed").with_source(e),
-                ),
-            }
+            num.parse::<f64>()
+                .map(|f| TokenKind::float(f))
+                .map_err(|e| TokenError::new("parse float failed").with_source(e))
         } else {
-            match num.parse::<i64>() {
-                Ok(i) => Token::int(i),
-                Err(e) => Token::Error(
-                    TokenError::new(self.location(start), "parse int failed").with_source(e),
-                ),
-            }
+            num.parse::<i64>()
+                .map(|i| TokenKind::int(i))
+                .map_err(|e| TokenError::new("parse float failed").with_source(e))
         }
     }
 
-    fn eat_string(&mut self) -> Token<'i> {
-        match self.eat_qoutes('"') {
-            Ok(s) => Token::Literal(Literal::String(s)),
-            Err(t) => t,
+    fn eat_string(&mut self) -> Result<TokenKind, TokenError> {
+        self.eat_qoutes('"')
+            .map(|s| TokenKind::Literal(Literal::String(s)))
+    }
+
+    fn eat_char(&mut self) -> Result<TokenKind, TokenError> {
+        let pos = self.offset;
+        let s = self.eat_qoutes('\'')?;
+
+        if s.chars().count() == 1 {
+            Ok(TokenKind::Literal(Literal::Char(s.chars().next().unwrap())))
+        } else {
+            Err(TokenError::new("too many char for CharLit"))
         }
     }
 
-    fn eat_char(&mut self) -> Token<'i> {
-        let pos = self.position;
-        match self.eat_qoutes('\'') {
-            Ok(s) => {
-                if s.chars().count() == 1 {
-                    Token::Literal(Literal::Char(s.chars().next().unwrap()))
-                } else {
-                    let location = self.location(pos);
-                    Token::Error(TokenError::new(location, "too many char for CharLit"))
-                }
-            }
-            Err(t) => t,
-        }
-    }
-
-    fn eat_comment(&mut self) -> Token<'i> {
+    fn eat_comment(&mut self) -> Result<TokenKind, TokenError> {
         self.advance(2);
 
         let s = self.eat_while(|c| c != '\n');
 
-        self.advance(1);
+        self.advance(1); // eat `\n`
 
-        Token::Comment(s)
+        Ok(TokenKind::Comment)
     }
 
-    fn eat_qoutes(&mut self, qoute: char) -> Result<String, Token<'i>> {
+    fn eat_qoutes(&mut self, qoute: char) -> Result<String, TokenError> {
         let mut ret = String::new();
 
-        self.advance(1); // skip qoute
+        self.advance(1); // skip start qoute
 
         let mut is_backslash_previous = false;
 
@@ -289,11 +244,7 @@ impl<'i> Tokenizer<'i> {
                                 if c == qoute {
                                     c
                                 } else {
-                                    let location = self.location(self.position);
-                                    return Err(Token::Error(TokenError::new(
-                                        location,
-                                        "unknown char after escape",
-                                    )));
+                                    return Err(TokenError::new("unknown char after escape"));
                                 }
                             }
                         };
@@ -307,38 +258,89 @@ impl<'i> Tokenizer<'i> {
             }
         }
 
-        Err(Token::Eof)
+        Err(TokenError::new("incompleted qouted"))
     }
 
-    fn eat_tree(&mut self) -> Token<'i> {
+    fn eat_tree(&mut self) -> Result<TokenKind, TokenError> {
         let mut group = Vec::new();
 
-        let close = match self.next_char().unwrap() {
-            '(' => (TreeType::Group, Token::Punctuation(Punctuation::RParen)),
-            '[' => (TreeType::Array, Token::Punctuation(Punctuation::RSquare)),
-            '{' => (TreeType::Block, Token::Punctuation(Punctuation::RBracket)),
-            _ => unreachable!(),
-        };
+        let _open = self.next_char().unwrap();
 
         loop {
-            match self.next_token() {
-                Token::Eof => {
-                    let location = self.location(self.position);
-                    return Token::Error(TokenError::new(location, "unclose group"));
+            let start = self.location();
+
+            match self.next_token_kind()? {
+                TokenKind::Eof => {
+                    return Err(TokenError::new("unclose group"));
                 }
-                t if t == close.1 => {
-                    return Token::TokenTree(close.0, group);
-                }
+                TokenKind::Symbol(Symbol::RParen) => return Ok(TokenKind::ParenTree(group)),
+                TokenKind::Symbol(Symbol::RSquare) => return Ok(TokenKind::SquareTree(group)),
+                TokenKind::Symbol(Symbol::RBracket) => return Ok(TokenKind::BracketTree(group)),
+
                 t => {
-                    group.push(t);
+                    group.push(self.new_token(start, t));
                 }
             }
         }
     }
 
-    pub fn stripped(self) -> StrippedTokenizer<'i, Tokenizer<'i>> {
-        let a = self.into_iter();
-        StrippedTokenizer::new(a)
+    fn eat_symbol(&mut self, peek: char) -> Result<TokenKind, TokenError> {
+        // try 3 byte
+        if self.has_at_lease(3) {
+            if self.starts_with("..=") {
+                self.advance(3);
+                return Ok(TokenKind::Symbol(Symbol::DotDotEq));
+            }
+        }
+        // try 2 byte
+        if self.has_at_lease(2) {
+            let pat = &self.chars.clone().as_str()[..2];
+            let token = match pat {
+                // logic op
+                "&&" | "||" |
+                // assign
+                "+=" | "-=" | "*=" | "/=" | "%=" | "^=" | "&=" | "|=" |
+                // compare op
+                "==" | "!=" | ">=" | "<=" |
+                // others
+                "::" | "->" | ".." => {
+                    Symbol::from_str(pat).ok().map(TokenKind::Symbol)
+                }
+                _ => None,
+            };
+
+            if let Some(t) = token {
+                self.advance(2);
+                return Ok(t);
+            }
+        }
+
+        let token = match peek {
+            // num op
+            '+' | '-' | '*' | '/' | '%' | '^' |
+            // compare op
+            '>' | '<' |
+            // closed tree
+            ')' | ']' | '}' |
+            // others
+            ',' | ':' | ';' | '#' | '!' | '?' | '&' | '=' | '.' => {
+                let mut tmp = [0u8; 4];
+                Symbol::from_str(peek.encode_utf8(&mut tmp)).ok().map(TokenKind::Symbol)
+            }
+            _ => None,
+        };
+
+        if let Some(t) = token {
+            self.advance(1);
+            return Ok(t);
+        }
+
+        Err(TokenError::new(format!("unknown({peek})")))
+    }
+
+    pub fn token_stream(self) -> Result<TokenStream, TokenError> {
+        let tokens: Result<Vec<_>, TokenError> = self.into_iter().collect();
+        tokens.map(TokenStream::new)
     }
 }
 
@@ -352,46 +354,55 @@ impl<'i> fmt::Debug for Tokenizer<'i> {
 }
 
 impl<'i> Iterator for Tokenizer<'i> {
-    type Item = Token<'i>;
+    type Item = Result<Token, TokenError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.next_token() {
-            Token::Eof => None,
+            Ok(t) if t.kind == TokenKind::Eof => None,
             t => Some(t),
         }
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct StrippedTokenizer<'i, I: Iterator<Item = Token<'i>>> {
-    iter: I,
+pub struct TokenStream {
+    iter: <Vec<Token> as IntoIterator>::IntoIter,
 }
 
-impl<'i, I: Iterator<Item = Token<'i>>> StrippedTokenizer<'i, I> {
-    pub fn with_input(filename: &str, input: &'i str) -> StrippedTokenizer<'i, Tokenizer<'i>> {
-        let iter = Tokenizer::new(filename, input);
-        StrippedTokenizer::new(iter)
+impl<'i> TokenStream {
+    pub fn new(iter: Vec<Token>) -> Self {
+        TokenStream {
+            iter: iter.into_iter(),
+        }
     }
 
-    pub fn new(iter: I) -> Self {
-        StrippedTokenizer { iter: iter }
-    }
-
-    pub fn from_iter(iter: I) -> Self {
-        StrippedTokenizer { iter }
+    pub fn next_token(&mut self) -> Option<TokenKind> {
+        self.next().map(|t| t.kind)
     }
 }
 
-impl<'i, I: Iterator<Item = Token<'i>>> Iterator for StrippedTokenizer<'i, I> {
-    type Item = Token<'i>;
+impl<'i> Iterator for TokenStream {
+    type Item = Token;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.iter.next() {
-            Some(Token::Comment(_)) => self.next(),
-            Some(Token::Whitespace(_)) => self.next(),
-            Some(t) => Some(t),
-            None => None,
-        }
+        self.iter.next().and_then(|token| match token.kind {
+            TokenKind::Comment | TokenKind::Whitespace => self.next(),
+            _ => Some(token),
+        })
+    }
+}
+
+/// A token stream iterator.
+#[derive(Debug, Clone)]
+pub struct TokenStreamIter<'i> {
+    iter: slice::Iter<'i, Token>,
+}
+
+impl<'i> Iterator for TokenStreamIter<'i> {
+    type Item = Token;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().cloned()
     }
 }
 
@@ -400,60 +411,41 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_ws() {
-        let inputs: Vec<(&str, &str)> = vec![
-            ("", ""),
-            ("\t   ", "\t   "),
-            (" \t\n\rabc", " \t\n\r"),
-            ("abc", ""),
-        ];
-
-        for i in &inputs {
-            let mut tokenizer = Tokenizer::new("", i.0);
-
-            let ws = tokenizer.eat_whitespace();
-
-            // println!("pos: >{}<", tokenizer.pos())
-            assert_eq!(ws, Token::whitespace(i.1));
-        }
-    }
-
-    #[test]
     fn test_tokenizer() {
-        let inputs: Vec<(&str, Vec<Token>)> = vec![
+        let inputs: Vec<(&str, Vec<TokenKind>)> = vec![
             (
                 "a b\tc",
                 vec![
-                    Token::ident("a"),
-                    Token::whitespace(" "),
-                    Token::ident("b"),
-                    Token::whitespace("\t"),
-                    Token::ident("c"),
+                    TokenKind::ident("a"),
+                    TokenKind::Whitespace,
+                    TokenKind::ident("b"),
+                    TokenKind::Whitespace,
+                    TokenKind::ident("c"),
                 ],
             ),
             (
                 "hello,123,123.4",
                 vec![
-                    Token::ident("hello"),
-                    Token::punctuation(","),
-                    Token::int(123),
-                    Token::punctuation(","),
-                    Token::float(123.4),
+                    TokenKind::ident("hello"),
+                    TokenKind::symbol(","),
+                    TokenKind::int(123),
+                    TokenKind::symbol(","),
+                    TokenKind::float(123.4),
                 ],
             ),
             (
                 r#"let a=b+c*123;"#,
                 vec![
-                    Token::Keyword(Keyword::Let),
-                    Token::whitespace(" "),
-                    Token::ident("a"),
-                    Token::punctuation("="),
-                    Token::ident("b"),
-                    Token::punctuation("+"),
-                    Token::ident("c"),
-                    Token::punctuation("*"),
-                    Token::int(123),
-                    Token::punctuation(";"),
+                    TokenKind::Keyword(Keyword::Let),
+                    TokenKind::Whitespace,
+                    TokenKind::ident("a"),
+                    TokenKind::symbol("="),
+                    TokenKind::ident("b"),
+                    TokenKind::symbol("+"),
+                    TokenKind::ident("c"),
+                    TokenKind::symbol("*"),
+                    TokenKind::int(123),
+                    TokenKind::symbol(";"),
                 ],
             ),
         ];
@@ -464,12 +456,12 @@ mod test {
             let mut ret = Vec::new();
 
             loop {
-                let t = tokenizer.next_token();
-                if t == Token::Eof {
+                let t = tokenizer.next_token().unwrap();
+                if t.kind == TokenKind::Eof {
                     break;
                 }
 
-                ret.push(t);
+                ret.push(t.kind);
             }
 
             assert_eq!(ret, i.1);
@@ -499,19 +491,35 @@ mod test {
         let inputs: Vec<&str> = vec!["a[b[c]]", "a[b[c[d[e[f]]]]]", "a(b(c(d(e()))))"];
 
         fn print(token: &Token) {
-            if let Token::TokenTree(ty, group) = token {
-                for g in group {
-                    print!("->");
-                    print(g)
+            match &token.kind {
+                TokenKind::ParenTree(group) => {
+                    for g in group {
+                        print!("->");
+                        print(&g)
+                    }
                 }
-            } else {
-                println!("{token:?}");
+                TokenKind::SquareTree(group) => {
+                    for g in group {
+                        print!("->");
+                        print(&g)
+                    }
+                }
+                TokenKind::BracketTree(group) => {
+                    for g in group {
+                        print!("->");
+                        print(&g)
+                    }
+                }
+                _ => {
+                    println!("{token:?}");
+                }
             }
         }
 
         for i in inputs {
             let tokenizer = Tokenizer::new("", i);
             for t in tokenizer {
+                let t = t.unwrap();
                 print(&t);
                 println!("{t:?}");
             }

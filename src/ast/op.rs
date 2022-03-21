@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::token::Punctuation;
+use super::Symbol;
 
 macro_rules! define_op {
     (
@@ -36,9 +36,9 @@ macro_rules! define_op {
                 }
             }
 
-            pub fn from_punctuation(p: Punctuation) -> Result<Self, &'static str> {
+            pub fn from_punctuation(p: Symbol) -> Result<Self, &'static str> {
                 match p {
-                    $(Punctuation::$punc => Ok($def::$name),)*
+                    $(Symbol::$punc => Ok($def::$name),)*
                     _ => Err("unknown op"),
                 }
             }
@@ -145,45 +145,45 @@ pub enum BinOp {
 }
 
 impl BinOp {
-    pub fn from_punctuation(p: Punctuation) -> Result<Self, &'static str> {
+    pub fn from_symbol(p: Symbol) -> Result<Self, &'static str> {
         match p {
             // num op
-            Punctuation::Plus => Ok(BinOp::Num(NumOp::Add)),
-            Punctuation::Minus => Ok(BinOp::Num(NumOp::Sub)),
-            Punctuation::Star => Ok(BinOp::Num(NumOp::Mul)),
-            Punctuation::Slash => Ok(BinOp::Num(NumOp::Div)),
-            Punctuation::Percent => Ok(BinOp::Num(NumOp::Mod)),
+            Symbol::Plus => Ok(BinOp::Num(NumOp::Add)),
+            Symbol::Minus => Ok(BinOp::Num(NumOp::Sub)),
+            Symbol::Star => Ok(BinOp::Num(NumOp::Mul)),
+            Symbol::Slash => Ok(BinOp::Num(NumOp::Div)),
+            Symbol::Percent => Ok(BinOp::Num(NumOp::Mod)),
             // bit op
-            Punctuation::And => Ok(BinOp::Bit(BitOp::And)),
-            Punctuation::Or => Ok(BinOp::Bit(BitOp::Or)),
-            Punctuation::Caret => Ok(BinOp::Bit(BitOp::Xor)),
-            Punctuation::LShift => Ok(BinOp::Bit(BitOp::Shl)),
-            Punctuation::RShift => Ok(BinOp::Bit(BitOp::Shr)),
+            Symbol::And => Ok(BinOp::Bit(BitOp::And)),
+            Symbol::Or => Ok(BinOp::Bit(BitOp::Or)),
+            Symbol::Caret => Ok(BinOp::Bit(BitOp::Xor)),
+            Symbol::LShift => Ok(BinOp::Bit(BitOp::Shl)),
+            Symbol::RShift => Ok(BinOp::Bit(BitOp::Shr)),
             // comp op
-            Punctuation::EqEq => Ok(BinOp::Comp(CompOp::Equal)),
-            Punctuation::NotEq => Ok(BinOp::Comp(CompOp::NotEqual)),
-            Punctuation::Lt => Ok(BinOp::Comp(CompOp::LessThan)),
-            Punctuation::LtE => Ok(BinOp::Comp(CompOp::LessThanOrEqual)),
-            Punctuation::Gt => Ok(BinOp::Comp(CompOp::GreatThan)),
-            Punctuation::GtE => Ok(BinOp::Comp(CompOp::GreatThanOrEqual)),
+            Symbol::EqEq => Ok(BinOp::Comp(CompOp::Equal)),
+            Symbol::NotEq => Ok(BinOp::Comp(CompOp::NotEqual)),
+            Symbol::Lt => Ok(BinOp::Comp(CompOp::LessThan)),
+            Symbol::LtE => Ok(BinOp::Comp(CompOp::LessThanOrEqual)),
+            Symbol::Gt => Ok(BinOp::Comp(CompOp::GreatThan)),
+            Symbol::GtE => Ok(BinOp::Comp(CompOp::GreatThanOrEqual)),
             // logic op
-            Punctuation::AndAnd => Ok(BinOp::Log(LogOp::And)),
-            Punctuation::OrOr => Ok(BinOp::Log(LogOp::Or)),
+            Symbol::AndAnd => Ok(BinOp::Log(LogOp::And)),
+            Symbol::OrOr => Ok(BinOp::Log(LogOp::Or)),
             // assign op
-            Punctuation::Eq => Ok(BinOp::Assign(AssignOp::Assign)),
-            Punctuation::PlusEq => Ok(BinOp::Assign(AssignOp::Add)),
-            Punctuation::MinusEq => Ok(BinOp::Assign(AssignOp::Sub)),
-            Punctuation::StarEq => Ok(BinOp::Assign(AssignOp::Mul)),
-            Punctuation::SlashEq => Ok(BinOp::Assign(AssignOp::Div)),
-            Punctuation::PercentEq => Ok(BinOp::Assign(AssignOp::Mod)),
+            Symbol::Eq => Ok(BinOp::Assign(AssignOp::Assign)),
+            Symbol::PlusEq => Ok(BinOp::Assign(AssignOp::Add)),
+            Symbol::MinusEq => Ok(BinOp::Assign(AssignOp::Sub)),
+            Symbol::StarEq => Ok(BinOp::Assign(AssignOp::Mul)),
+            Symbol::SlashEq => Ok(BinOp::Assign(AssignOp::Div)),
+            Symbol::PercentEq => Ok(BinOp::Assign(AssignOp::Mod)),
             // range op
-            Punctuation::DotDot => Ok(BinOp::Range(RangeOp::Range)),
-            Punctuation::DotDotEq => Ok(BinOp::Range(RangeOp::RangeTo)),
+            Symbol::DotDot => Ok(BinOp::Range(RangeOp::Range)),
+            Symbol::DotDotEq => Ok(BinOp::Range(RangeOp::RangeTo)),
             // field access
-            Punctuation::Dot => Ok(BinOp::Access(AccessOp::Field)),
-            Punctuation::PathSep => Ok(BinOp::Access(AccessOp::Path)),
+            Symbol::Dot => Ok(BinOp::Access(AccessOp::Field)),
+            Symbol::PathSep => Ok(BinOp::Access(AccessOp::Path)),
             // type decl
-            Punctuation::Colon => Ok(BinOp::DeclOp),
+            Symbol::Colon => Ok(BinOp::DeclOp),
             _ => Err("unknown bin op"),
         }
     }
