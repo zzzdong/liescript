@@ -3,7 +3,6 @@ mod bytecode;
 mod error;
 mod instructions;
 mod parser;
-mod token;
 mod tokenizer;
 mod value;
 mod vm;
