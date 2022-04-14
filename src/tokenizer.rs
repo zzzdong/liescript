@@ -35,9 +35,6 @@ pub enum Token {
     Literal(Literal),
     Keyword(Keyword),
     Symbol(Symbol),
-    ParenTree(Vec<Token>),
-    SquareTree(Vec<Token>),
-    BracketTree(Vec<Token>),
     Whitespace(String),
     Comment(String),
     Eof,
@@ -78,6 +75,9 @@ impl Token {
     }
     pub(crate) fn symbol(s: &str) -> Token {
         Token::Symbol(Symbol::from_str(s).unwrap())
+    }
+    pub(crate) fn whitespace(s: &str) -> Token {
+        Token::Whitespace(s.into())
     }
 }
 
@@ -133,10 +133,6 @@ impl<'i> Tokenizer<'i> {
                         // comment
                         if self.starts_with("//") {
                             return self.eat_comment();
-                        }
-                        // parser tree
-                        if matches!(c, '(' | '[' | '{') {
-                            return self.eat_tree();
                         }
                         // symbol
                         self.eat_symbol(c)
@@ -352,8 +348,8 @@ impl<'i> Tokenizer<'i> {
                     return Err(TokenError::new("unclose group"));
                 }
                 Token::Symbol(Symbol::RParen) => return Ok(self.new_token(start, token)),
-                Token::Symbol(Symbol::RSquare) => return Ok(Token::SquareTree(group)),
-                Token::Symbol(Symbol::RBracket) => return Ok(Token::BracketTree(group)),
+                Token::Symbol(Symbol::RSquare) => return Ok(self.new_token(start, token)),
+                Token::Symbol(Symbol::RBracket) => return Ok(self.new_token(start, token)),
 
                 t => {
                     group.push(self.new_token(start, t));
@@ -398,8 +394,8 @@ impl<'i> Tokenizer<'i> {
             '+' | '-' | '*' | '/' | '%' | '^' |
             // compare op
             '>' | '<' |
-            // closed tree
-            ')' | ']' | '}' |
+            // paren
+            '(' | ')' | '[' | ']' | '{' | '}' |
             // others
             ',' | ':' | ';' | '#' | '!' | '?' | '&' | '=' | '.' => {
                 let mut tmp = [0u8; 4];
@@ -432,11 +428,11 @@ impl<'i> fmt::Debug for Tokenizer<'i> {
 }
 
 impl<'i> Iterator for Tokenizer<'i> {
-    type Item = Result<Token, TokenError>;
+    type Item = Result<(Token,Span), TokenError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.next_token() {
-            Ok(t) if t.kind == Token::Eof => None,
+            Ok(t) if t.0 == Token::Eof => None,
             t => Some(t),
         }
     }
@@ -444,27 +440,27 @@ impl<'i> Iterator for Tokenizer<'i> {
 
 #[derive(Clone, Debug)]
 pub struct TokenStream {
-    iter: <Vec<Token> as IntoIterator>::IntoIter,
+    iter: <Vec<(Token, Span)> as IntoIterator>::IntoIter,
 }
 
 impl<'i> TokenStream {
-    pub fn new(iter: Vec<Token>) -> Self {
+    pub fn new(iter: Vec<(Token, Span)>) -> Self {
         TokenStream {
             iter: iter.into_iter(),
         }
     }
 
     pub fn next_token(&mut self) -> Option<Token> {
-        self.next().map(|t| t.kind)
+        self.next().map(|t| t.0)
     }
 }
 
 impl<'i> Iterator for TokenStream {
-    type Item = Token;
+    type Item = (Token, Span);
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.iter.next().and_then(|token| match token.kind {
-            Token::Comment | Token::Whitespace => self.next(),
+        self.iter.next().and_then(|token| match token.0 {
+            Token::Comment(_) | Token::Whitespace(_) => self.next(),
             _ => Some(token),
         })
     }
@@ -495,9 +491,9 @@ mod test {
                 "a b\tc",
                 vec![
                     Token::ident("a"),
-                    Token::Whitespace,
+                    Token::whitespace(" "),
                     Token::ident("b"),
-                    Token::Whitespace,
+                    Token::whitespace(" "),
                     Token::ident("c"),
                 ],
             ),
@@ -515,7 +511,7 @@ mod test {
                 r#"let a=b+c*123;"#,
                 vec![
                     Token::Keyword(Keyword::Let),
-                    Token::Whitespace,
+                    Token::whitespace(" "),
                     Token::ident("a"),
                     Token::symbol("="),
                     Token::ident("b"),
@@ -535,11 +531,11 @@ mod test {
 
             loop {
                 let t = tokenizer.next_token().unwrap();
-                if t.kind == Token::Eof {
+                if t.0 == Token::Eof {
                     break;
                 }
 
-                ret.push(t.kind);
+                ret.push(t.0);
             }
 
             assert_eq!(ret, i.1);
@@ -561,46 +557,6 @@ mod test {
 
         for t in tokenizer {
             println!("{:?}", t);
-        }
-    }
-
-    #[test]
-    fn test_tokenizer_tokentree() {
-        let inputs: Vec<&str> = vec!["a[b[c]]", "a[b[c[d[e[f]]]]]", "a(b(c(d(e()))))"];
-
-        fn print(token: &Token) {
-            match &token.kind {
-                Token::ParenTree(group) => {
-                    for g in group {
-                        print!("->");
-                        print(&g)
-                    }
-                }
-                Token::SquareTree(group) => {
-                    for g in group {
-                        print!("->");
-                        print(&g)
-                    }
-                }
-                Token::BracketTree(group) => {
-                    for g in group {
-                        print!("->");
-                        print(&g)
-                    }
-                }
-                _ => {
-                    println!("{token:?}");
-                }
-            }
-        }
-
-        for i in inputs {
-            let tokenizer = Tokenizer::new("", i);
-            for t in tokenizer {
-                let t = t.unwrap();
-                print(&t);
-                println!("{t:?}");
-            }
         }
     }
 }

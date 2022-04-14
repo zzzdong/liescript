@@ -1,6 +1,4 @@
-use crate::ast::ident::Ident;
-use crate::ast::literal::Literal;
-use crate::ast::op::{BinOp, NumOp, PostfixOp, PrefixOp};
+use crate::ast::{op::{BinOp, NumOp, PostfixOp, PrefixOp}, Literal, Ident};
 use std::fmt;
 
 use super::AstNode;
@@ -230,7 +228,7 @@ impl fmt::Display for Expr {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct BlockExpr {
-    pub block: Vec<AstNode>,
+    // pub block: Vec<AstNode>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

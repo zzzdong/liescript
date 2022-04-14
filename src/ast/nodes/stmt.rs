@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::token::Ident;
+use crate::ast::Ident;
 
 #[derive(Debug, Clone)]
 pub enum Statement {
