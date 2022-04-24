@@ -1,4 +1,7 @@
-use crate::ast::{op::{BinOp, NumOp, PostfixOp, PrefixOp}, Literal, Ident};
+use crate::ast::{
+    op::{BinOp, NumOp, PostfixOp, PrefixOp},
+    Ident, Literal,
+};
 use std::fmt;
 
 use super::AstNode;

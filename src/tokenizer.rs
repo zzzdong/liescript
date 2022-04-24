@@ -428,7 +428,7 @@ impl<'i> fmt::Debug for Tokenizer<'i> {
 }
 
 impl<'i> Iterator for Tokenizer<'i> {
-    type Item = Result<(Token,Span), TokenError>;
+    type Item = Result<(Token, Span), TokenError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.next_token() {

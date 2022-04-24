@@ -12,16 +12,17 @@ pub enum Statement {
 
 #[derive(Debug, Clone)]
 pub enum Item {
-    Import(ImportStmt),
+    Use(UseStmt),
+    Struct(StructItem),
 }
 
 #[derive(Debug, Clone)]
-pub struct ImportStmt {
-    pub items: Vec<ImportItem>,
+pub struct UseStmt {
+    pub items: Vec<UseItem>,
 }
 
 #[derive(Debug, Clone)]
-pub struct ImportItem {
+pub struct UseItem {
     pub path: Vec<PathSegment>,
     pub alias: Option<Ident>,
 }
@@ -34,11 +35,11 @@ pub struct UseTree {
 }
 
 impl UseTree {
-    pub fn flat(self) -> Vec<ImportItem> {
+    pub fn flat(self) -> Vec<UseItem> {
         let mut ret = Vec::new();
 
         if self.children.is_empty() {
-            ret.push(ImportItem {
+            ret.push(UseItem {
                 path: self.path,
                 alias: self.alias,
             });
@@ -77,6 +78,36 @@ impl Display for PathSegment {
             Self::PathCrate => write!(f, "crate"),
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct StructItem {
+    pub name: Ident,
+    pub fields: Vec<StructField>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StructField {
+    pub visibility: Visibility,
+    pub name: Ident,
+    pub ty: TypePath,
+}
+
+#[derive(Debug, Clone)]
+pub enum Visibility {
+    Pub,
+    Priv,
+}
+
+#[derive(Debug, Clone)]
+pub enum TypeDecl {
+    Primitive,
+    TypePath,
+}
+
+#[derive(Debug, Clone)]
+pub struct TypePath {
+    pub path: Vec<PathSegment>,
 }
 
 // #[derive(Debug, Clone, PartialEq)]

@@ -3,42 +3,39 @@ use std::fmt;
 
 use crate::{
     ast::{
-        nodes::{ImportItem, ImportStmt, PathSegment, UseTree},
+        nodes::{PathSegment, StructField, StructItem, TypePath, UseItem, UseStmt, UseTree},
         Ident, Keyword, Literal, Symbol,
     },
-    tokenizer::{Token, TokenError, TokenStream},
+    tokenizer::{Span, Token, TokenError, TokenStream},
 };
 
 #[derive(Debug)]
-pub struct ParseError {
-    detail: Cow<'static, str>,
+pub enum ParseError {
+    /// The parser had an error (recoverable)
+    Error(Cow<'static, str>),
+    /// The parser had an unrecoverable error
+    Failure(Cow<'static, str>),
 }
 
 impl ParseError {
     pub(crate) fn failure<D: Into<Cow<'static, str>>>(detail: D) -> Self {
-        ParseError {
-            detail: detail.into(),
-        }
+        ParseError::Failure(detail.into())
     }
 
     pub(crate) fn unexpect(expected: impl std::fmt::Display, found: Token) -> Self {
-        ParseError {
-            detail: Cow::Owned(format!("expected {expected}, but found {found:?}")),
-        }
+        ParseError::Error(Cow::Owned(format!(
+            "expected {expected}, but found {found:?}"
+        )))
     }
 
     pub(crate) fn eof() -> Self {
-        ParseError {
-            detail: Cow::Borrowed("unexpect EOF"),
-        }
+        ParseError::Failure(Cow::Borrowed("unexpect EOF"))
     }
 }
 
 impl From<TokenError> for ParseError {
     fn from(e: TokenError) -> Self {
-        ParseError {
-            detail: e.detail.unwrap(),
-        }
+        ParseError::Failure(e.detail.unwrap())
     }
 }
 
@@ -169,26 +166,26 @@ impl From<TokenError> for ParseError {
 // }
 
 #[derive(Debug)]
-struct Node {
+struct UsePathNode {
     value: PathSegment,
-    children: Vec<Node>,
+    children: Vec<UsePathNode>,
     alias: Option<Ident>,
 }
 
-impl Node {
+impl UsePathNode {
     fn new(seg: PathSegment) -> Self {
-        Node {
+        UsePathNode {
             value: seg,
             children: Vec::new(),
             alias: None,
         }
     }
 
-    fn flat(self, mut stack: Vec<PathSegment>) -> Vec<ImportItem> {
+    fn flat(self, mut stack: Vec<PathSegment>) -> Vec<UseItem> {
         stack.push(self.value);
 
         if self.children.is_empty() {
-            vec![ImportItem {
+            vec![UseItem {
                 path: stack,
                 alias: self.alias,
             }]
@@ -204,7 +201,7 @@ impl Node {
         }
     }
 
-    fn print(node: &Node, offset: usize) {
+    fn print(node: &UsePathNode, offset: usize) {
         println!(
             "{:width$}{:?} {:?}",
             "",
@@ -219,28 +216,146 @@ impl Node {
 }
 
 #[derive(Debug)]
+enum Node {
+    Seg((PathSegment, Option<Ident>)),
+    Tree(Vec<Vec<Node>>),
+}
+
+impl Node {
+    fn flat(nodes: Vec<Node>) -> Vec<UseItem> {
+        let mut alias = None;
+        let mut stack = Vec::new();
+
+        for node in nodes {
+            match node {
+                Node::Seg((seg, a)) => {
+                    stack.push(seg);
+                    alias = a;
+                }
+                Node::Tree(subs) => {
+                    let mut ret = Vec::new();
+
+                    for s in subs {
+                        let ss = stack.clone();
+                        let n = Node::flat(s);
+                        for mut nn in n {
+                            let mut p = ss.clone();
+                            p.extend(nn.path);
+                            nn.path = p;
+                            ret.push(nn);
+                        }
+                    }
+
+                    return ret;
+                }
+            }
+        }
+
+        vec![UseItem { path: stack, alias }]
+    }
+}
+
+#[derive(Debug)]
 struct Parser {
     input: TokenStream,
+    last_span: Option<Span>,
 }
 
 impl Parser {
     pub fn new(input: TokenStream) -> Self {
-        Parser { input }
+        Parser {
+            input,
+            last_span: None,
+        }
     }
 
-    pub fn parse_import_item(&mut self) -> Result<ImportStmt, ParseError> {
+    pub fn parse_use_stmt(&mut self) -> Result<UseStmt, ParseError> {
         self.expect_token(Token::Keyword(Keyword::Use))?;
         let use_tree = self.parse_usetree()?;
 
         let path = Vec::new();
 
-        Ok(ImportStmt {
+        Ok(UseStmt {
             items: use_tree.flat(path),
         })
     }
 
+    pub fn parse_use_stmt2(&mut self) -> Result<UseStmt, ParseError> {
+        self.expect_token(Token::Keyword(Keyword::Use))?;
+        let use_tree = self.parse_use_tree()?;
+
+        Ok(UseStmt {
+            items: Node::flat(use_tree),
+        })
+    }
+
+    pub fn parse_node(&mut self) -> Result<Node, ParseError> {
+        let tok = self.peek_token()?;
+        match tok {
+            Token::Symbol(Symbol::LBracket) => {
+                self.next_token()?;
+                let tree = self.separated_list(Symbol::Comma, Parser::parse_use_tree)?;
+                self.expect_token(Token::Symbol(Symbol::RBracket))?;
+                Ok(Node::Tree(tree))
+            }
+            _ => {
+                let seg = self.parse_path_segment()?;
+
+                let alias = if let Ok(Token::Keyword(Keyword::As)) = self.peek_token() {
+                    self.next_token()?;
+                    Some(self.parse_ident()?)
+                } else {
+                    None
+                };
+
+                Ok(Node::Seg((seg, alias)))
+            }
+        }
+    }
+
+    pub fn parse_use_tree(&mut self) -> Result<Vec<Node>, ParseError> {
+        self.separated_list(Symbol::PathSep, Parser::parse_node)
+    }
+
+    // pub fn parse_struct_item(&mut self) -> Result<StructItem, ParseError> {
+    //     self.expect_token(Token::Keyword(Keyword::Struct))?;
+
+    //     let name = self.parse_ident()?;
+
+    //     self.expect_token(Token::Symbol(Symbol::LBracket))?;
+
+    //     self.parse_struct_fileds()?;
+
+    //     self.expect_token(Token::Symbol(Symbol::RBracket))?;
+
+    // }
+
+    // fn parse_struct_fileds(&mut self) -> Result<Vec<StructField>, ParseError> {
+    //     let tok = self.peek_token()?;
+
+    //     match tok {
+    //         Token::Symbol(Symbol::RBracket) => {
+    //             break;
+    //         }
+    //         Token::
+    //     }
+
+    // }
+
+    // fn parse_struct_field(&mut self) -> Result<StructField, ParseError> {
+    //     let ident = self.parse_ident()?;
+    //     self.expect_token(Token::Symbol(Symbol::Colon))?;
+    //     self.parse_type_path()?;
+    // }
+
+    fn parse_type_path(&mut self) -> Result<TypePath, ParseError> {
+        let path = self.separated_list(Symbol::PathSep, Parser::parse_path_segment)?;
+
+        Ok(TypePath { path })
+    }
+
     fn parse_path_segment(&mut self) -> Result<PathSegment, ParseError> {
-        match self.consume_token()? {
+        match self.next_token()? {
             Token::Ident(ident) => Ok(PathSegment::Ident(ident)),
             Token::Keyword(Keyword::Super) => Ok(PathSegment::PathSuper),
             Token::Keyword(Keyword::SelfValue) => Ok(PathSegment::PathSelf),
@@ -249,34 +364,34 @@ impl Parser {
         }
     }
 
-    fn parse_usetree(&mut self) -> Result<Node, ParseError> {
+    fn parse_usetree(&mut self) -> Result<UsePathNode, ParseError> {
         self.parse_sub_usetree(&[Token::Symbol(Symbol::Semicolon)])
     }
 
-    fn parse_sub_usetree(&mut self, delimit: &[Token]) -> Result<Node, ParseError> {
+    fn parse_sub_usetree(&mut self, delimited: &[Token]) -> Result<UsePathNode, ParseError> {
         let seg = self.parse_path_segment()?;
 
-        let mut root = Node::new(seg);
+        let mut root = UsePathNode::new(seg);
 
         let mut tmp = &mut root;
 
         loop {
             match self.peek_token()? {
                 Token::Symbol(Symbol::PathSep) => {
-                    self.consume_token()?;
+                    self.next_token()?;
                 }
                 Token::Keyword(Keyword::As) => {
-                    self.consume_token()?;
+                    self.next_token()?;
                     let ident = self.parse_ident()?;
                     tmp.alias = Some(ident);
 
                     let tok = self.peek_token()?;
-                    if !delimit.contains(&tok) {
+                    if !delimited.contains(&tok) {
                         return Err(ParseError::unexpect("delimited", tok));
                     }
                     break;
                 }
-                tok if delimit.contains(&tok) => break,
+                tok if delimited.contains(&tok) => break,
                 tok => {
                     return Err(ParseError::unexpect("path_segment1", tok));
                 }
@@ -291,7 +406,7 @@ impl Parser {
                     ])?;
                     tmp.children.push(tree);
                     loop {
-                        match self.consume_token()? {
+                        match self.next_token()? {
                             Token::Symbol(Symbol::Comma) => {}
                             Token::Symbol(Symbol::RBracket) => {
                                 break;
@@ -310,7 +425,7 @@ impl Parser {
                 }
                 tok => {
                     let seg = self.parse_path_segment()?;
-                    let node = Node::new(seg);
+                    let node = UsePathNode::new(seg);
                     tmp.children.push(node);
                     tmp = tmp.children.last_mut().unwrap();
                 }
@@ -321,31 +436,102 @@ impl Parser {
     }
 
     fn parse_ident(&mut self) -> Result<Ident, ParseError> {
-        match self.consume_token()? {
+        match self.next_token()? {
             Token::Ident(ident) => Ok(ident),
             token => Err(ParseError::unexpect("ident", token)),
         }
+    }
+
+    /// Look for an expected symbol and consume it if it exists
+    fn parse_symbol(&mut self, expected: Symbol) -> bool {
+        match self.peek_token() {
+            Ok(Token::Symbol(sym)) if expected == sym => {
+                self.next_token().unwrap();
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn separated_list<T, F>(&mut self, sep: Symbol, f: F) -> Result<Vec<T>, ParseError>
+    where
+        F: Fn(&mut Parser) -> Result<T, ParseError>,
+    {
+        let mut values = Vec::new();
+        loop {
+            values.push(f(self)?);
+            if !self.parse_symbol(sep) {
+                break;
+            }
+        }
+        Ok(values)
+    }
+
+    /// Consume the next token if it matches the expected token, otherwise return false
+    #[must_use]
+    fn consume_token(&mut self, expected: &Token) -> bool {
+        match self.peek_token() {
+            Ok(tok) if tok == *expected => {
+                self.input.next_token().unwrap();
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn expect_token<T, P>(&mut self, pat: P) -> Result<T, ParseError>
+    where
+        P: Pattern<Output = T>,
+    {
+        let tok = self.next_token()?;
+        pat.parse(tok)
     }
 
     fn peek_token(&mut self) -> Result<Token, ParseError> {
         self.input.clone().next_token().ok_or(ParseError::eof())
     }
 
-    fn consume_token(&mut self) -> Result<Token, ParseError> {
+    fn next_token(&mut self) -> Result<Token, ParseError> {
         self.input.next_token().ok_or(ParseError::eof())
     }
+}
 
-    fn expect_token(&mut self, expected: Token) -> Result<Token, ParseError> {
-        match self.consume_token()? {
-            token if token == expected => Ok(token),
-            token => Err(ParseError::unexpect(format!("{expected:?}"), token)),
+trait Pattern {
+    type Output;
+    fn parse(self, tok: Token) -> Result<Self::Output, ParseError>;
+}
+
+impl Pattern for Token {
+    type Output = Token;
+
+    fn parse(self, tok: Token) -> Result<Token, ParseError> {
+        if tok == self {
+            Ok(tok)
+        } else {
+            Err(ParseError::unexpect(format!("{self:?}"), tok))
         }
+    }
+}
+
+impl<F> Pattern for F
+where
+    F: Fn(Token) -> Result<Token, ParseError>,
+{
+    type Output = Token;
+
+    fn parse(self, tok: Token) -> Result<Token, ParseError> {
+        self(tok)
     }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::{ast::nodes::ImportStmt, ast::Ident, parser::Parser, tokenizer::Tokenizer};
+    use crate::{
+        ast::nodes::UseStmt,
+        ast::Ident,
+        parser::{Node, Parser},
+        tokenizer::Tokenizer,
+    };
 
     #[test]
     fn import_item() {
@@ -366,9 +552,42 @@ mod test {
         for input in inputs {
             let i = Tokenizer::new("", input.0).token_stream().unwrap();
 
+            let mut parser = Parser::new(i.clone());
+
+            println!("=> {:?}", parser.parse_use_stmt());
+
+            let mut parser = Parser::new(i);
+            println!("-> {:?}", parser.parse_use_stmt2())
+        }
+    }
+
+    #[test]
+    fn parse_use_tree() {
+        let inputs = [
+            ("std::net::TcpStream;", true),
+            ("crate::parser;", true),
+            (
+                "std::{net::TcpStream, encoding::json, fs::{open, close}, io::{read, write}};",
+                true,
+            ),
+            (
+                "std::{net::TcpStream as TcpSocket, encoding::json, fs::{open, close}, io::{read as r, write as w}};",
+                true,
+            ),
+        ];
+
+        for input in inputs {
+            let i = Tokenizer::new("", input.0).token_stream().unwrap();
+
             let mut parser = Parser::new(i);
 
-            println!("=> {:?}", parser.parse_import_item());
+            let ret = parser.parse_use_tree();
+
+            for item in Node::flat(ret.unwrap()) {
+                println!("->{:?}", item);
+            }
+
+            println!("======");
         }
     }
 }
