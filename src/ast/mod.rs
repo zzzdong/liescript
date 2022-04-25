@@ -83,6 +83,7 @@ define_keywords! {
     Match => "match",
     Mod => "mod",
     Move => "move",
+    Priv => "priv",
     Pub => "pub",
     Ref => "ref",
     Return => "return",

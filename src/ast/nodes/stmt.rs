@@ -90,7 +90,7 @@ pub struct StructItem {
 pub struct StructField {
     pub visibility: Visibility,
     pub name: Ident,
-    pub ty: TypePath,
+    pub ty: Ty,
 }
 
 #[derive(Debug, Clone)]
@@ -99,10 +99,26 @@ pub enum Visibility {
     Priv,
 }
 
+impl Default for Visibility {
+    fn default() -> Self {
+        Visibility::Pub
+    }
+}
+
 #[derive(Debug, Clone)]
-pub enum TypeDecl {
-    Primitive,
-    TypePath,
+pub enum Ty {
+    Primitive(PrimitiveTy),
+    TypePath(TypePath),
+}
+
+
+#[derive(Debug, Clone)]
+pub enum PrimitiveTy {
+    Byte,
+    Char,
+    Int,
+    Float,
+    Str,
 }
 
 #[derive(Debug, Clone)]
