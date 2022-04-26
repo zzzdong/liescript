@@ -1,12 +1,15 @@
 use std::borrow::Cow;
 use std::fmt;
+use tracing::debug;
 
 use crate::{
     ast::{
         nodes::{
+            expr::{BinOpExpr, Expr, FuncCallExpr, IndexExpr, LiteralExpr, PrefixOpExpr, PostfixOpExpr, ArrayExpr},
             PathSegment, PrimitiveTy, StructField, StructItem, Ty, TypePath, UseItem, UseStmt,
-            UseTree, Visibility, expr::Expr,
+            UseTree, Visibility,
         },
+        op::{AccessOp, AssignOp, BinOp, BitOp, CompOp, LogOp, NumOp, RangeOp, PrefixOp, PostfixOp},
         Ident, Keyword, Literal, Symbol,
     },
     tokenizer::{Span, Token, TokenError, TokenStream},
@@ -82,6 +85,30 @@ impl PathNode {
     }
 }
 
+/// https://doc.rust-lang.org/reference/expressions.html#expression-precedence
+#[repr(u8)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Precedence {
+    Lowest = 0,
+    Assign,
+    Range,
+    LogicOr,
+    LogicAnd,
+    Equal,
+    Compare,
+    BitOr,
+    BitXor,
+    BitAnd,
+    BitShift,
+    Term,
+    Factor,
+    As,
+    Prefix,
+    Postfix,
+    Call,
+    Path,
+}
+
 #[derive(Debug)]
 struct Parser {
     input: TokenStream,
@@ -112,10 +139,10 @@ impl Parser {
     pub fn parse_node(&mut self) -> Result<PathNode, ParseError> {
         let tok = self.peek_token()?;
         match tok {
-            Token::Symbol(Symbol::LBracket) => {
+            Token::Symbol(Symbol::LBrace) => {
                 self.consume_token()?;
                 let tree = self.separated_list(Symbol::Comma, Parser::parse_use_tree)?;
-                self.expect_token(Token::Symbol(Symbol::RBracket))?;
+                self.expect_token(Token::Symbol(Symbol::RBrace))?;
                 Ok(PathNode::Tree(tree))
             }
             _ => {
@@ -138,12 +165,12 @@ impl Parser {
 
         let name = self.parse_ident()?;
 
-        self.expect_token(Token::Symbol(Symbol::LBracket))?;
+        self.expect_token(Token::Symbol(Symbol::LBrace))?;
 
         let fields =
-            self.separated_list0(Symbol::Comma, Parser::parse_struct_field, Symbol::RBracket)?;
+            self.separated_list0(Symbol::Comma, Parser::parse_struct_field, Symbol::RBrace)?;
 
-        self.expect_token(Token::Symbol(Symbol::RBracket))?;
+        self.expect_token(Token::Symbol(Symbol::RBrace))?;
 
         Ok(StructItem { name, fields })
     }
@@ -166,11 +193,136 @@ impl Parser {
         })
     }
 
+    /// reference: https://github.com/sqlparser-rs/sqlparser-rs/blob/main/src/parser.rs
+    /// reference: https://eli.thegreenplace.net/2010/01/02/top-down-operator-precedence-parsing
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
-        unimplemented!()
+        self.parse_subexpr(Precedence::Lowest)
     }
 
+    fn parse_subexpr(&mut self, precedence: Precedence) -> Result<Expr, ParseError> {
+        debug!("parsing expr");
 
+        let mut expr = self.parse_prefix()?;
+        debug!("prefix: {expr:?}");
+
+        loop {
+            let next_precedence = self.next_precedence()?;
+            debug!("next precedence: {next_precedence:?}");
+
+            if precedence >= next_precedence {
+                break;
+            }
+
+            expr = self.parse_infix(expr, next_precedence)?;
+        }
+
+        Ok(expr)
+    }
+
+    fn parse_prefix(&mut self) -> Result<Expr, ParseError> {
+        match self.try_prefixop() {
+            Some(op) => {
+                Ok(Expr::PrefixOp(
+                    PrefixOpExpr {
+                        op,
+                        rhs: Box::new(self.parse_subexpr(Precedence::Prefix)?),
+                    }
+                ))
+            }
+            None => {
+                self.parse_primary()
+            }
+        }
+    }
+
+    fn parse_infix(&mut self, expr: Expr, precedence: Precedence) -> Result<Expr, ParseError> {
+        let tok = self.consume_token()?;
+
+        debug!("parse_infix, first token {tok:?}");
+
+        match tok {
+            Token::Symbol(sym) => match sym {
+                Symbol::LParen => {
+                    let args: Vec<Expr> =
+                        self.separated_list0(Symbol::Comma, Parser::parse_expr, Symbol::RParen)?;
+                    self.expect_token(Token::Symbol(Symbol::RParen))?;
+                    Ok(Expr::FuncCall(FuncCallExpr {
+                        name: Box::new(expr),
+                        args,
+                    }))
+                }
+                Symbol::LBracket => {
+                    let index = self.parse_expr()?;
+                    self.expect_token(Token::Symbol(Symbol::RBracket))?;
+                    Ok(Expr::Index(IndexExpr {
+                        name: Box::new(expr),
+                        rhs: Box::new(index),
+                    }))
+                }
+                Symbol::Question => {
+                    Ok(Expr::PostfixOp(PostfixOpExpr {
+                        op: PostfixOp::Try,
+                        lhs: Box::new(expr),
+                    }))
+                }
+                _ => {
+                    if let Ok(op) = BinOp::from_symbol(sym) {
+                        Ok(Expr::BinOp(BinOpExpr {
+                            op,
+                            lhs: Box::new(expr),
+                            rhs: Box::new(self.parse_subexpr(precedence)?),
+                        }))
+                    } else {
+                        unreachable!()
+                    }
+                }
+            },
+            _ => {
+                unreachable!()
+            }
+        }
+    }
+
+    fn parse_primary(&mut self) -> Result<Expr, ParseError> {
+        match self.consume_token()? {
+            Token::Literal(lit) => Ok(Expr::Literal(lit.into())),
+            Token::Ident(ident) => Ok(Expr::Ident(ident.into())),
+            Token::Symbol(Symbol::LParen) => {
+                let expr = self.parse_subexpr(Precedence::Lowest)?;
+                self.expect_token(Token::Symbol(Symbol::RParen))?;
+                Ok(expr)
+            }
+            Token::Symbol(Symbol::LBracket) => {
+                let items = self.separated_list0(Symbol::Comma, Parser::parse_expr, Symbol::RBracket)?;
+                self.expect_token(Token::Symbol(Symbol::RBracket))?;
+                Ok(Expr::Array(ArrayExpr {
+                    items
+                }))
+            }
+            tok => Err(ParseError::unexpect("primary", tok)),
+        }
+    }
+
+    fn next_precedence(&mut self) -> Result<Precedence, ParseError> {
+        let tok = self.input.clone().next_token();
+
+        debug!("next_precedence() {tok:?}");
+
+        let p = match tok {
+            Some(Token::Symbol(sym)) => match sym {
+                Symbol::Plus | Symbol::Minus => Precedence::Term,
+                Symbol::Star | Symbol::Slash | Symbol::Percent => Precedence::Factor,
+                Symbol::LParen | Symbol::LBracket => Precedence::Call,
+                Symbol::Dot => Precedence::Call,
+                Symbol::Gt | Symbol::GtE | Symbol::Lt | Symbol::LtE | Symbol::EqEq => Precedence::Compare,
+                Symbol::Question => Precedence::Postfix,
+                _ => Precedence::Lowest,
+            },
+            _ => Precedence::Lowest,
+        };
+
+        Ok(p)
+    }
 
     fn parse_type_path(&mut self) -> Result<TypePath, ParseError> {
         let path = self.separated_list(Symbol::PathSep, Parser::parse_path_segment)?;
@@ -195,6 +347,21 @@ impl Parser {
         }
     }
 
+    fn try_prefixop(&mut self) -> Option<PrefixOp> {
+        self.try_next(|tok| match tok {
+            Token::Symbol(sym) => PrefixOp::from_symbol(sym).ok(),
+            _ => None,
+        })
+    }
+
+
+    fn try_binop(&mut self) -> Option<BinOp> {
+        self.try_next(|tok| match tok {
+            Token::Symbol(sym) => BinOp::from_symbol(sym).ok(),
+            _ => None,
+        })
+    }
+
     /// Look for visibility and consume it if it exists
     fn try_visibility(&mut self) -> Option<Visibility> {
         self.try_next(|tok| match tok {
@@ -211,6 +378,7 @@ impl Parser {
     fn try_primitive(&mut self) -> Option<PrimitiveTy> {
         self.try_next(|tok| match tok {
             Token::Keyword(kw) => match kw {
+                Keyword::Bool => Some(PrimitiveTy::Bool),
                 Keyword::Byte => Some(PrimitiveTy::Byte),
                 Keyword::Char => Some(PrimitiveTy::Char),
                 Keyword::Int => Some(PrimitiveTy::Int),
@@ -245,14 +413,14 @@ impl Parser {
         &mut self,
         sep: Symbol,
         f: F,
-        terminal: Symbol,
+        terminated: Symbol,
     ) -> Result<Vec<T>, ParseError>
     where
         F: Fn(&mut Parser) -> Result<T, ParseError>,
     {
         let mut values = Vec::new();
         loop {
-            if self.test_next(&Token::Symbol(terminal)) {
+            if self.test_next(&Token::Symbol(terminated)) {
                 break;
             }
             values.push(f(self)?);
@@ -301,7 +469,7 @@ impl Parser {
     }
 
     /// Peek next token without cunsume it
-    fn peek_token(&mut self) -> Result<Token, ParseError> {
+    fn peek_token(&self) -> Result<Token, ParseError> {
         self.input.clone().next_token().ok_or(ParseError::eof())
     }
 
@@ -424,6 +592,44 @@ mod test {
             let mut parser = Parser::new(i.clone());
 
             println!("=> {:?}", parser.parse_struct_item());
+        }
+    }
+
+    #[test]
+    fn parse_expr() {
+        tracing_subscriber::fmt()
+            // filter spans/events with level TRACE or higher.
+            .with_max_level(tracing::Level::DEBUG)
+            // build but do not install the subscriber.
+            .finish();
+
+        let inputs = [
+            "a+b",
+            "a+b*c",
+            "a*b+c",
+            "(a+b)*c",
+            "a(b,c)",
+            "a()",
+            "a(b+c, d*e)",
+            "a[b]",
+            "a.b.c(d)",
+            "a.b[c]",
+            "a+b>c",
+            "a+b<=c*d",
+            "-a+b*c",
+            "&a*b-c",
+            "*a.b+c",
+            "a()?",
+            "a.b?",
+            "-a.b?"
+        ];
+
+        for input in &inputs {
+            let i = Tokenizer::new("", input).token_stream().unwrap();
+
+            let mut parser = Parser::new(i.clone());
+
+            println!("=> {:?}", parser.parse_expr());
         }
     }
 }

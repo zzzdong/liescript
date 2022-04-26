@@ -114,6 +114,7 @@ pub enum Ty {
 
 #[derive(Debug, Clone)]
 pub enum PrimitiveTy {
+    Bool,
     Byte,
     Char,
     Int,

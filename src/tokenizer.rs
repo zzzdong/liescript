@@ -348,8 +348,8 @@ impl<'i> Tokenizer<'i> {
                     return Err(TokenError::new("unclose group"));
                 }
                 Token::Symbol(Symbol::RParen) => return Ok(self.new_token(start, token)),
-                Token::Symbol(Symbol::RSquare) => return Ok(self.new_token(start, token)),
                 Token::Symbol(Symbol::RBracket) => return Ok(self.new_token(start, token)),
+                Token::Symbol(Symbol::RBrace) => return Ok(self.new_token(start, token)),
 
                 t => {
                     group.push(self.new_token(start, t));

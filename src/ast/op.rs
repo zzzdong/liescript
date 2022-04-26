@@ -36,7 +36,7 @@ macro_rules! define_op {
                 }
             }
 
-            pub fn from_punctuation(p: Symbol) -> Result<Self, &'static str> {
+            pub fn from_symbol(p: Symbol) -> Result<Self, &'static str> {
                 match p {
                     $(Symbol::$punc => Ok($def::$name),)*
                     _ => Err("unknown op"),
@@ -63,6 +63,8 @@ macro_rules! define_op {
 define_op!(PrefixOp,
     "-" => (Neg, Minus),
     "!" => (Not, Not),
+    "&" => (Ref, And),
+    "*" => (Deref, Star),
 );
 
 define_op!(PostfixOp,

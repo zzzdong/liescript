@@ -1,3 +1,5 @@
+use std::fmt;
+
 pub mod nodes;
 pub mod op;
 
@@ -57,6 +59,7 @@ macro_rules! define_keywords {
 
 define_keywords! {
     As => "as",
+    Bool => "bool",
     Break => "break",
     Byte => "byte",
     Class => "class",
@@ -122,9 +125,9 @@ macro_rules! define_symbols {
                 $name:ident => $str:expr,
             )*
         ) => {
-            #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+            #[derive(Copy, Clone, Debug,  PartialEq, Eq, PartialOrd, Ord, Hash)]
             pub enum Symbol {
-                $($name,)*
+                $(#[doc=$str]$name,)*
             }
 
             impl Symbol {
@@ -204,10 +207,10 @@ define_symbols! {
     Question   => "?",
     LParen     => "(",
     RParen     => ")",
-    LSquare    => "[",
-    RSquare    => "]",
-    LBracket   => "{",
-    RBracket   => "}",
+    LBracket    => "[",
+    RBracket    => "]",
+    LBrace   => "{",
+    RBrace   => "}",
     // SQuotes    => "'",
     // DQuotes    => "\"",
 }

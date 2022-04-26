@@ -35,7 +35,7 @@ impl Expr {
 
                 Self::traval_expr(rhs, level, f)?;
             }
-            Expr::Index(IndexExpr { lhs, rhs }) => {
+            Expr::Index(IndexExpr { name: lhs, rhs }) => {
                 writeln!(
                     f,
                     "{:indent$}{}",
@@ -150,7 +150,7 @@ impl Expr {
 
                 node
             }
-            Expr::Index(IndexExpr { lhs, rhs }) => {
+            Expr::Index(IndexExpr { name: lhs, rhs }) => {
                 let node = graph.add_node("IndexOpExpr".into());
 
                 let lhs = Self::expr_graph(lhs, graph);
@@ -241,7 +241,7 @@ pub struct ArrayExpr {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct IndexExpr {
-    pub lhs: Box<Expr>,
+    pub name: Box<Expr>,
     pub rhs: Box<Expr>,
 }
 
