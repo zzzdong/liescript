@@ -2,11 +2,13 @@ use std::fmt::Display;
 
 use crate::ast::Ident;
 
+use super::expr::Expr;
+
 #[derive(Debug, Clone)]
 pub enum Statement {
     Empty,
     Item(Item),
-    Let,
+    Let(LetStmt),
     Expr,
 }
 
@@ -127,12 +129,12 @@ pub struct TypePath {
     pub path: Vec<PathSegment>,
 }
 
-// #[derive(Debug, Clone, PartialEq)]
-// pub struct LetStmt {
-//     pub var: Ident,
-//     pub decl: Option<Ident>,
-//     pub expr: Expr,
-// }
+#[derive(Debug, Clone)]
+pub struct LetStmt {
+    pub var: Ident,
+    pub ty: Option<Ty>,
+    pub expr: Option<Expr>,
+}
 
 // #[derive(Debug, Clone, PartialEq)]
 // pub struct LoopStmt {

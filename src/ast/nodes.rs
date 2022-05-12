@@ -3,6 +3,7 @@ pub mod stmt;
 
 // pub use expr::*;
 pub use stmt::*;
+pub use expr::*;
 
 // use self::expr::Expr;
 // use self::stmt::{FuncDefStmt, ImportStmt, LetStmt, StructDefStmt, WhileStmt};
@@ -23,4 +24,5 @@ impl Ast {
 #[derive(Debug, Clone)]
 pub enum AstNode {
     Statement(Statement),
+    Expr(Expr),
 }

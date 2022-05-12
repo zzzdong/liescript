@@ -5,11 +5,16 @@ use tracing::debug;
 use crate::{
     ast::{
         nodes::{
-            expr::{BinOpExpr, Expr, FuncCallExpr, IndexExpr, LiteralExpr, PrefixOpExpr, PostfixOpExpr, ArrayExpr},
-            PathSegment, PrimitiveTy, StructField, StructItem, Ty, TypePath, UseItem, UseStmt,
-            UseTree, Visibility,
+            expr::{
+                ArrayExpr, BinOpExpr, Expr, FuncCallExpr, IndexExpr, LiteralExpr, PostfixOpExpr,
+                PrefixOpExpr,
+            },
+            Ast, AstNode, Item, LetStmt, PathSegment, PrimitiveTy, Statement, StructField,
+            StructItem, Ty, TypePath, UseItem, UseStmt, UseTree, Visibility,
         },
-        op::{AccessOp, AssignOp, BinOp, BitOp, CompOp, LogOp, NumOp, RangeOp, PrefixOp, PostfixOp},
+        op::{
+            AccessOp, AssignOp, BinOp, BitOp, CompOp, LogOp, NumOp, PostfixOp, PrefixOp, RangeOp,
+        },
         Ident, Keyword, Literal, Symbol,
     },
     tokenizer::{Span, Token, TokenError, TokenStream},
@@ -123,6 +128,45 @@ impl Parser {
         }
     }
 
+    pub fn parse(&mut self) -> Result<Ast, ParseError> {
+        let mut ast = Ast {
+            children: Vec::new(),
+        };
+
+        loop {
+            if self.is_eof() {
+                break;
+            }
+
+            let peek = self.peek_token()?;
+            match peek.clone() {
+                Token::Keyword(kw) => match kw {
+                    Keyword::Let => {
+                        let stmt = self.parse_let_stmt()?;
+                        self.expect_token(Token::Symbol(Symbol::Semicolon))?;
+                        ast.children.push(AstNode::Statement(Statement::Let(stmt)));
+                    }
+                    Keyword::Use => {
+                        let item = self.parse_use_stmt()?;
+                        self.expect_token(Token::Symbol(Symbol::Semicolon))?;
+                        ast.children
+                            .push(AstNode::Statement(Statement::Item(Item::Use(item))));
+                    }
+                    Keyword::Struct => {
+                        let item = self.parse_struct_item()?;
+                        ast.children
+                            .push(AstNode::Statement(Statement::Item(Item::Struct(item))));
+                    }
+                    t => return Err(ParseError::unexpect("top level keyword", peek)),
+                },
+
+                t => return Err(ParseError::unexpect("top level keyword", peek)),
+            }
+        }
+
+        Ok(ast)
+    }
+
     pub fn parse_use_stmt(&mut self) -> Result<UseStmt, ParseError> {
         self.expect_token(Token::Keyword(Keyword::Use))?;
         let use_tree = self.parse_use_tree()?;
@@ -148,8 +192,7 @@ impl Parser {
             _ => {
                 let seg = self.parse_path_segment()?;
 
-                let alias = if let Ok(Token::Keyword(Keyword::As)) = self.peek_token() {
-                    self.consume_token()?;
+                let alias = if self.next_token(&Token::Keyword(Keyword::As)) {
                     Some(self.parse_ident()?)
                 } else {
                     None
@@ -181,16 +224,42 @@ impl Parser {
         let name = self.parse_ident()?;
         self.expect_token(Token::Symbol(Symbol::Colon))?;
 
-        let ty = match self.try_primitive() {
-            Some(ty) => Ty::Primitive(ty),
-            None => Ty::TypePath(self.parse_type_path()?),
-        };
+        let ty = self.parse_ty()?;
 
         Ok(StructField {
             visibility,
             name,
             ty,
         })
+    }
+
+    fn parse_ty(&mut self) -> Result<Ty, ParseError> {
+        let ty = match self.try_primitive() {
+            Some(ty) => Ty::Primitive(ty),
+            None => Ty::TypePath(self.parse_type_path()?),
+        };
+
+        Ok(ty)
+    }
+
+    fn parse_let_stmt(&mut self) -> Result<LetStmt, ParseError> {
+        self.expect_token(Token::Keyword(Keyword::Let))?;
+
+        let var = self.parse_ident()?;
+
+        let ty = if self.next_token(&Token::Symbol(Symbol::Colon)) {
+            Some(self.parse_ty()?)
+        } else {
+            None
+        };
+
+        let expr = if self.next_token(&Token::Symbol(Symbol::Eq)) {
+            Some(self.parse_expr()?)
+        } else {
+            None
+        };
+
+        Ok(LetStmt { var, ty, expr })
     }
 
     /// reference: https://github.com/sqlparser-rs/sqlparser-rs/blob/main/src/parser.rs
@@ -221,17 +290,11 @@ impl Parser {
 
     fn parse_prefix(&mut self) -> Result<Expr, ParseError> {
         match self.try_prefixop() {
-            Some(op) => {
-                Ok(Expr::PrefixOp(
-                    PrefixOpExpr {
-                        op,
-                        rhs: Box::new(self.parse_subexpr(Precedence::Prefix)?),
-                    }
-                ))
-            }
-            None => {
-                self.parse_primary()
-            }
+            Some(op) => Ok(Expr::PrefixOp(PrefixOpExpr {
+                op,
+                rhs: Box::new(self.parse_subexpr(Precedence::Prefix)?),
+            })),
+            None => self.parse_primary(),
         }
     }
 
@@ -259,12 +322,10 @@ impl Parser {
                         rhs: Box::new(index),
                     }))
                 }
-                Symbol::Question => {
-                    Ok(Expr::PostfixOp(PostfixOpExpr {
-                        op: PostfixOp::Try,
-                        lhs: Box::new(expr),
-                    }))
-                }
+                Symbol::Question => Ok(Expr::PostfixOp(PostfixOpExpr {
+                    op: PostfixOp::Try,
+                    lhs: Box::new(expr),
+                })),
                 _ => {
                     if let Ok(op) = BinOp::from_symbol(sym) {
                         Ok(Expr::BinOp(BinOpExpr {
@@ -293,11 +354,10 @@ impl Parser {
                 Ok(expr)
             }
             Token::Symbol(Symbol::LBracket) => {
-                let items = self.separated_list0(Symbol::Comma, Parser::parse_expr, Symbol::RBracket)?;
+                let items =
+                    self.separated_list0(Symbol::Comma, Parser::parse_expr, Symbol::RBracket)?;
                 self.expect_token(Token::Symbol(Symbol::RBracket))?;
-                Ok(Expr::Array(ArrayExpr {
-                    items
-                }))
+                Ok(Expr::Array(ArrayExpr { items }))
             }
             tok => Err(ParseError::unexpect("primary", tok)),
         }
@@ -314,7 +374,9 @@ impl Parser {
                 Symbol::Star | Symbol::Slash | Symbol::Percent => Precedence::Factor,
                 Symbol::LParen | Symbol::LBracket => Precedence::Call,
                 Symbol::Dot => Precedence::Call,
-                Symbol::Gt | Symbol::GtE | Symbol::Lt | Symbol::LtE | Symbol::EqEq => Precedence::Compare,
+                Symbol::Gt | Symbol::GtE | Symbol::Lt | Symbol::LtE | Symbol::EqEq => {
+                    Precedence::Compare
+                }
                 Symbol::Question => Precedence::Postfix,
                 _ => Precedence::Lowest,
             },
@@ -353,7 +415,6 @@ impl Parser {
             _ => None,
         })
     }
-
 
     fn try_binop(&mut self) -> Option<BinOp> {
         self.try_next(|tok| match tok {
@@ -483,6 +544,10 @@ impl Parser {
             }
             _ => false,
         }
+    }
+
+    fn is_eof(&self) -> bool {
+        self.input.clone().next_token().is_none()
     }
 }
 
@@ -621,15 +686,54 @@ mod test {
             "*a.b+c",
             "a()?",
             "a.b?",
-            "-a.b?"
+            "-a.b?",
         ];
 
         for input in &inputs {
-            let i = Tokenizer::new("", input).token_stream().unwrap();
+            let ts = Tokenizer::new("", input).token_stream().unwrap();
 
-            let mut parser = Parser::new(i.clone());
+            let mut parser = Parser::new(ts.clone());
 
             println!("=> {:?}", parser.parse_expr());
+        }
+    }
+
+    #[test]
+    fn test_parse_let_stmt() {
+        let inputs = [
+            ("let a = a * b"),
+            ("let a : int = a * b"),
+            ("let a = [a, b[c], d(), e(f)]"),
+            ("let a"),
+        ];
+
+        for input in &inputs {
+            let ts = Tokenizer::new("", input).token_stream().unwrap();
+
+            let mut parser = Parser::new(ts.clone());
+
+            let ret = parser.parse_let_stmt();
+
+            println!("=> {ret:?}");
+        }
+    }
+
+    #[test]
+    fn test_parse() {
+        let inputs = [
+            "let a = a * b;",
+            "use std::{net::TcpStream as TcpSocket, encoding::json, fs::{open, close}, io::{read as r, write as w}};",
+            r"struct A { a: int, pub b: float, priv c:byte, priv d: AAA}",
+        ];
+
+        for input in &inputs {
+            let ts = Tokenizer::new("", input).token_stream().unwrap();
+
+            let mut parser = Parser::new(ts.clone());
+
+            let ret = parser.parse();
+
+            println!("=> {ret:?}");
         }
     }
 }
