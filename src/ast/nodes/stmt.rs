@@ -113,7 +113,6 @@ pub enum Ty {
     TypePath(TypePath),
 }
 
-
 #[derive(Debug, Clone)]
 pub enum PrimitiveTy {
     Bool,

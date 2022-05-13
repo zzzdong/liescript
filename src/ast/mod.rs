@@ -20,6 +20,12 @@ impl Ident {
     }
 }
 
+impl fmt::Display for Ident {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Ident({})", self.as_str())
+    }
+}
+
 macro_rules! define_keywords {
         (
             $(
@@ -51,6 +57,12 @@ macro_rules! define_keywords {
                             unreachable!();
                         }
 
+                    }
+                }
+
+                pub fn as_str(&self) -> &str {
+                    match self {
+                        $(Keyword::$name => $str,)*
                     }
                 }
             }
@@ -112,11 +124,24 @@ define_keywords! {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Literal {
     Byte(u8),
-    Char(char),
     Bool(bool),
+    Char(char),
     Integer(i64),
     Float(f64),
     String(String),
+}
+
+impl fmt::Display for Literal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Literal::Byte(b) => write!(f, "{:#x}", b),
+            Literal::Char(c) => write!(f, "'{}'", c),
+            Literal::Bool(b) => write!(f, "{}", b),
+            Literal::Integer(i) => write!(f, "{}", i),
+            Literal::Float(i) => write!(f, "{}", i),
+            Literal::String(s) => write!(f, "{}", s),
+        }
+    }
 }
 
 macro_rules! define_symbols {
@@ -152,7 +177,7 @@ macro_rules! define_symbols {
                     }
                 }
 
-                pub fn as_str(self) -> &'static str {
+                pub fn as_str(&self) -> &'static str {
                     match self {
                         $(Symbol::$name => $str,)*
                     }

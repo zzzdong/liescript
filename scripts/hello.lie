@@ -1,0 +1,23 @@
+use std::net::TcpStream;
+use std::net::TcpStream as TcpSocket;
+use std::encoding::json;
+use std::fs::{open, close};
+use std::io::{Read, Write};
+
+
+
+// DATA
+struct Data {
+    count: int,
+    score: float,
+}
+
+
+// fn hello() {
+//     std::fmt::println("Hello, world!");
+// }
+// 
+// 
+// fn main() {
+//     hello();
+// }

@@ -17,7 +17,7 @@ use crate::{
         },
         Ident, Keyword, Literal, Symbol,
     },
-    tokenizer::{Span, Token, TokenError, TokenStream},
+    tokenizer::{Span, Token, TokenError, TokenKind, TokenStream},
 };
 
 #[derive(Debug)]
@@ -33,7 +33,17 @@ impl ParseError {
         ParseError::Failure(detail.into())
     }
 
-    pub(crate) fn unexpect(expected: impl std::fmt::Display, found: Token) -> Self {
+    pub(crate) fn unexpect(expected: impl std::fmt::Display, found: &Token) -> Self {
+        let span = found.span;
+        let tok = &found.kind;
+
+        ParseError::Error(Cow::Owned(format!(
+            "expected {expected}, but found {tok} @ {}",
+            span
+        )))
+    }
+
+    pub(crate) fn unexpect_kind(expected: impl std::fmt::Display, found: &TokenKind) -> Self {
         ParseError::Error(Cow::Owned(format!(
             "expected {expected}, but found {found:?}"
         )))
@@ -128,7 +138,7 @@ impl Parser {
         }
     }
 
-    pub fn parse(&mut self) -> Result<Ast, ParseError> {
+    pub fn parse_top_level(&mut self) -> Result<Ast, ParseError> {
         let mut ast = Ast {
             children: Vec::new(),
         };
@@ -138,17 +148,13 @@ impl Parser {
                 break;
             }
 
-            let peek = self.peek_token()?;
-            match peek.clone() {
-                Token::Keyword(kw) => match kw {
-                    Keyword::Let => {
-                        let stmt = self.parse_let_stmt()?;
-                        self.expect_token(Token::Symbol(Symbol::Semicolon))?;
-                        ast.children.push(AstNode::Statement(Statement::Let(stmt)));
-                    }
+            let tok = self.peek_token()?;
+
+            match tok.kind {
+                TokenKind::Keyword(kw) => match kw {
                     Keyword::Use => {
                         let item = self.parse_use_stmt()?;
-                        self.expect_token(Token::Symbol(Symbol::Semicolon))?;
+                        self.expect_token(TokenKind::Symbol(Symbol::Semicolon))?;
                         ast.children
                             .push(AstNode::Statement(Statement::Item(Item::Use(item))));
                     }
@@ -157,10 +163,10 @@ impl Parser {
                         ast.children
                             .push(AstNode::Statement(Statement::Item(Item::Struct(item))));
                     }
-                    t => return Err(ParseError::unexpect("top level keyword", peek)),
+                    _ => return Err(ParseError::unexpect("top level keyword", &tok)),
                 },
 
-                t => return Err(ParseError::unexpect("top level keyword", peek)),
+                _ => return Err(ParseError::unexpect("top level keyword", &tok)),
             }
         }
 
@@ -168,7 +174,7 @@ impl Parser {
     }
 
     pub fn parse_use_stmt(&mut self) -> Result<UseStmt, ParseError> {
-        self.expect_token(Token::Keyword(Keyword::Use))?;
+        self.expect_token(TokenKind::Keyword(Keyword::Use))?;
         let use_tree = self.parse_use_tree()?;
 
         Ok(UseStmt {
@@ -182,17 +188,17 @@ impl Parser {
 
     pub fn parse_node(&mut self) -> Result<PathNode, ParseError> {
         let tok = self.peek_token()?;
-        match tok {
-            Token::Symbol(Symbol::LBrace) => {
+        match tok.kind {
+            TokenKind::Symbol(Symbol::LBrace) => {
                 self.consume_token()?;
                 let tree = self.separated_list(Symbol::Comma, Parser::parse_use_tree)?;
-                self.expect_token(Token::Symbol(Symbol::RBrace))?;
+                self.expect_token(TokenKind::Symbol(Symbol::RBrace))?;
                 Ok(PathNode::Tree(tree))
             }
             _ => {
                 let seg = self.parse_path_segment()?;
 
-                let alias = if self.next_token(&Token::Keyword(Keyword::As)) {
+                let alias = if self.next_token(&TokenKind::Keyword(Keyword::As)) {
                     Some(self.parse_ident()?)
                 } else {
                     None
@@ -204,16 +210,16 @@ impl Parser {
     }
 
     pub fn parse_struct_item(&mut self) -> Result<StructItem, ParseError> {
-        self.expect_token(Token::Keyword(Keyword::Struct))?;
+        self.expect_token(TokenKind::Keyword(Keyword::Struct))?;
 
         let name = self.parse_ident()?;
 
-        self.expect_token(Token::Symbol(Symbol::LBrace))?;
+        self.expect_token(TokenKind::Symbol(Symbol::LBrace))?;
 
         let fields =
             self.separated_list0(Symbol::Comma, Parser::parse_struct_field, Symbol::RBrace)?;
 
-        self.expect_token(Token::Symbol(Symbol::RBrace))?;
+        self.expect_token(TokenKind::Symbol(Symbol::RBrace))?;
 
         Ok(StructItem { name, fields })
     }
@@ -222,7 +228,7 @@ impl Parser {
         let visibility = self.try_visibility().unwrap_or_default();
 
         let name = self.parse_ident()?;
-        self.expect_token(Token::Symbol(Symbol::Colon))?;
+        self.expect_token(TokenKind::Symbol(Symbol::Colon))?;
 
         let ty = self.parse_ty()?;
 
@@ -243,17 +249,17 @@ impl Parser {
     }
 
     fn parse_let_stmt(&mut self) -> Result<LetStmt, ParseError> {
-        self.expect_token(Token::Keyword(Keyword::Let))?;
+        self.expect_token(TokenKind::Keyword(Keyword::Let))?;
 
         let var = self.parse_ident()?;
 
-        let ty = if self.next_token(&Token::Symbol(Symbol::Colon)) {
+        let ty = if self.next_token(&TokenKind::Symbol(Symbol::Colon)) {
             Some(self.parse_ty()?)
         } else {
             None
         };
 
-        let expr = if self.next_token(&Token::Symbol(Symbol::Eq)) {
+        let expr = if self.next_token(&TokenKind::Symbol(Symbol::Eq)) {
             Some(self.parse_expr()?)
         } else {
             None
@@ -303,12 +309,12 @@ impl Parser {
 
         debug!("parse_infix, first token {tok:?}");
 
-        match tok {
-            Token::Symbol(sym) => match sym {
+        match tok.kind {
+            TokenKind::Symbol(sym) => match sym {
                 Symbol::LParen => {
                     let args: Vec<Expr> =
                         self.separated_list0(Symbol::Comma, Parser::parse_expr, Symbol::RParen)?;
-                    self.expect_token(Token::Symbol(Symbol::RParen))?;
+                    self.expect_token(TokenKind::Symbol(Symbol::RParen))?;
                     Ok(Expr::FuncCall(FuncCallExpr {
                         name: Box::new(expr),
                         args,
@@ -316,7 +322,7 @@ impl Parser {
                 }
                 Symbol::LBracket => {
                     let index = self.parse_expr()?;
-                    self.expect_token(Token::Symbol(Symbol::RBracket))?;
+                    self.expect_token(TokenKind::Symbol(Symbol::RBracket))?;
                     Ok(Expr::Index(IndexExpr {
                         name: Box::new(expr),
                         rhs: Box::new(index),
@@ -345,21 +351,23 @@ impl Parser {
     }
 
     fn parse_primary(&mut self) -> Result<Expr, ParseError> {
-        match self.consume_token()? {
-            Token::Literal(lit) => Ok(Expr::Literal(lit.into())),
-            Token::Ident(ident) => Ok(Expr::Ident(ident.into())),
-            Token::Symbol(Symbol::LParen) => {
+        let tok = self.consume_token()?;
+
+        match tok.kind {
+            TokenKind::Literal(lit) => Ok(Expr::Literal(lit.into())),
+            TokenKind::Ident(ident) => Ok(Expr::Ident(ident.into())),
+            TokenKind::Symbol(Symbol::LParen) => {
                 let expr = self.parse_subexpr(Precedence::Lowest)?;
-                self.expect_token(Token::Symbol(Symbol::RParen))?;
+                self.expect_token(TokenKind::Symbol(Symbol::RParen))?;
                 Ok(expr)
             }
-            Token::Symbol(Symbol::LBracket) => {
+            TokenKind::Symbol(Symbol::LBracket) => {
                 let items =
                     self.separated_list0(Symbol::Comma, Parser::parse_expr, Symbol::RBracket)?;
-                self.expect_token(Token::Symbol(Symbol::RBracket))?;
+                self.expect_token(TokenKind::Symbol(Symbol::RBracket))?;
                 Ok(Expr::Array(ArrayExpr { items }))
             }
-            tok => Err(ParseError::unexpect("primary", tok)),
+            _ => Err(ParseError::unexpect("primary", &tok)),
         }
     }
 
@@ -368,8 +376,8 @@ impl Parser {
 
         debug!("next_precedence() {tok:?}");
 
-        let p = match tok {
-            Some(Token::Symbol(sym)) => match sym {
+        let p = match tok.map(|t| t.kind) {
+            Some(TokenKind::Symbol(sym)) => match sym {
                 Symbol::Plus | Symbol::Minus => Precedence::Term,
                 Symbol::Star | Symbol::Slash | Symbol::Percent => Precedence::Factor,
                 Symbol::LParen | Symbol::LBracket => Precedence::Call,
@@ -393,32 +401,36 @@ impl Parser {
     }
 
     fn parse_path_segment(&mut self) -> Result<PathSegment, ParseError> {
-        match self.consume_token()? {
-            Token::Ident(ident) => Ok(PathSegment::Ident(ident)),
-            Token::Keyword(Keyword::Super) => Ok(PathSegment::PathSuper),
-            Token::Keyword(Keyword::SelfValue) => Ok(PathSegment::PathSelf),
-            Token::Keyword(Keyword::Crate) => Ok(PathSegment::PathCrate),
-            t => Err(ParseError::unexpect("PathSegment", t)),
+        let tok = self.consume_token()?;
+
+        match tok.kind {
+            TokenKind::Ident(ident) => Ok(PathSegment::Ident(ident)),
+            TokenKind::Keyword(Keyword::Super) => Ok(PathSegment::PathSuper),
+            TokenKind::Keyword(Keyword::SelfValue) => Ok(PathSegment::PathSelf),
+            TokenKind::Keyword(Keyword::Crate) => Ok(PathSegment::PathCrate),
+            _ => Err(ParseError::unexpect("PathSegment", &tok)),
         }
     }
 
     fn parse_ident(&mut self) -> Result<Ident, ParseError> {
-        match self.consume_token()? {
-            Token::Ident(ident) => Ok(ident),
-            token => Err(ParseError::unexpect("ident", token)),
+        let tok = self.consume_token()?;
+
+        match tok.kind {
+            TokenKind::Ident(ident) => Ok(ident),
+            _ => Err(ParseError::unexpect("ident", &tok)),
         }
     }
 
     fn try_prefixop(&mut self) -> Option<PrefixOp> {
         self.try_next(|tok| match tok {
-            Token::Symbol(sym) => PrefixOp::from_symbol(sym).ok(),
+            TokenKind::Symbol(sym) => PrefixOp::from_symbol(sym).ok(),
             _ => None,
         })
     }
 
     fn try_binop(&mut self) -> Option<BinOp> {
         self.try_next(|tok| match tok {
-            Token::Symbol(sym) => BinOp::from_symbol(sym).ok(),
+            TokenKind::Symbol(sym) => BinOp::from_symbol(sym).ok(),
             _ => None,
         })
     }
@@ -426,7 +438,7 @@ impl Parser {
     /// Look for visibility and consume it if it exists
     fn try_visibility(&mut self) -> Option<Visibility> {
         self.try_next(|tok| match tok {
-            Token::Keyword(kw) => match kw {
+            TokenKind::Keyword(kw) => match kw {
                 Keyword::Pub => Some(Visibility::Pub),
                 Keyword::Priv => Some(Visibility::Priv),
                 _ => return None,
@@ -438,7 +450,7 @@ impl Parser {
     /// Look for primitive and consume it if it exists
     fn try_primitive(&mut self) -> Option<PrimitiveTy> {
         self.try_next(|tok| match tok {
-            Token::Keyword(kw) => match kw {
+            TokenKind::Keyword(kw) => match kw {
                 Keyword::Bool => Some(PrimitiveTy::Bool),
                 Keyword::Byte => Some(PrimitiveTy::Byte),
                 Keyword::Char => Some(PrimitiveTy::Char),
@@ -453,7 +465,7 @@ impl Parser {
 
     /// Look for an expected symbol and consume it if it exists
     fn try_symbol(&mut self, expected: Symbol) -> bool {
-        self.next_token(&Token::Symbol(expected))
+        self.next_token(&TokenKind::Symbol(expected))
     }
 
     fn separated_list<T, F>(&mut self, sep: Symbol, f: F) -> Result<Vec<T>, ParseError>
@@ -481,7 +493,7 @@ impl Parser {
     {
         let mut values = Vec::new();
         loop {
-            if self.test_next(&Token::Symbol(terminated)) {
+            if self.test_next(&TokenKind::Symbol(terminated)) {
                 break;
             }
             values.push(f(self)?);
@@ -493,9 +505,9 @@ impl Parser {
     }
 
     /// Peek and test next token
-    fn test_next(&mut self, expected: &Token) -> bool {
+    fn test_next(&mut self, expected: &TokenKind) -> bool {
         match self.peek_token() {
-            Ok(tok) => &tok == expected,
+            Ok(tok) => &tok.kind == expected,
             _ => false,
         }
     }
@@ -503,10 +515,10 @@ impl Parser {
     /// Check next token, consume it if ok
     fn try_next<T, F>(&mut self, f: F) -> Option<T>
     where
-        F: Fn(Token) -> Option<T>,
+        F: Fn(TokenKind) -> Option<T>,
     {
         match self.peek_token() {
-            Ok(tok) => f(tok).map(|t| {
+            Ok(tok) => f(tok.kind).map(|t| {
                 self.consume_token().unwrap();
                 t
             }),
@@ -526,7 +538,7 @@ impl Parser {
         P: Pattern<Output = T>,
     {
         let tok = self.consume_token()?;
-        pat.parse(tok)
+        pat.parse(tok.kind)
     }
 
     /// Peek next token without cunsume it
@@ -536,9 +548,9 @@ impl Parser {
 
     /// Consume the next token if it matches the expected token, otherwise return false
     #[must_use]
-    fn next_token(&mut self, expected: &Token) -> bool {
+    fn next_token(&mut self, expected: &TokenKind) -> bool {
         match self.peek_token() {
-            Ok(tok) if tok == *expected => {
+            Ok(tok) if tok.kind == *expected => {
                 self.input.next_token().unwrap();
                 true
             }
@@ -553,28 +565,28 @@ impl Parser {
 
 trait Pattern {
     type Output;
-    fn parse(self, tok: Token) -> Result<Self::Output, ParseError>;
+    fn parse(self, tok: TokenKind) -> Result<Self::Output, ParseError>;
 }
 
-impl Pattern for Token {
-    type Output = Token;
+impl Pattern for TokenKind {
+    type Output = TokenKind;
 
-    fn parse(self, tok: Token) -> Result<Token, ParseError> {
+    fn parse(self, tok: TokenKind) -> Result<TokenKind, ParseError> {
         if tok == self {
             Ok(tok)
         } else {
-            Err(ParseError::unexpect(format!("{self:?}"), tok))
+            Err(ParseError::unexpect_kind(format!("{self:?}"), &tok))
         }
     }
 }
 
 impl<F> Pattern for F
 where
-    F: Fn(Token) -> Result<Token, ParseError>,
+    F: Fn(TokenKind) -> Result<TokenKind, ParseError>,
 {
-    type Output = Token;
+    type Output = TokenKind;
 
-    fn parse(self, tok: Token) -> Result<Token, ParseError> {
+    fn parse(self, tok: TokenKind) -> Result<TokenKind, ParseError> {
         self(tok)
     }
 }
@@ -720,20 +732,16 @@ mod test {
 
     #[test]
     fn test_parse() {
-        let inputs = [
-            "let a = a * b;",
-            "use std::{net::TcpStream as TcpSocket, encoding::json, fs::{open, close}, io::{read as r, write as w}};",
-            r"struct A { a: int, pub b: float, priv c:byte, priv d: AAA}",
-        ];
+        use std::fs;
 
-        for input in &inputs {
-            let ts = Tokenizer::new("", input).token_stream().unwrap();
+        let content = fs::read_to_string("scripts/hello.lie").unwrap();
 
-            let mut parser = Parser::new(ts.clone());
+        let ts = Tokenizer::new("", &content).token_stream().unwrap();
 
-            let ret = parser.parse();
+        let mut parser = Parser::new(ts.clone());
 
-            println!("=> {ret:?}");
-        }
+        let ret = parser.parse_top_level();
+
+        println!("=> {ret:?}");
     }
 }

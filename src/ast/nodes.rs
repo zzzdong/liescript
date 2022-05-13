@@ -2,8 +2,8 @@ pub mod expr;
 pub mod stmt;
 
 // pub use expr::*;
-pub use stmt::*;
 pub use expr::*;
+pub use stmt::*;
 
 // use self::expr::Expr;
 // use self::stmt::{FuncDefStmt, ImportStmt, LetStmt, StructDefStmt, WhileStmt};
