@@ -7,24 +7,30 @@ use super::expr::Expr;
 #[derive(Debug, Clone)]
 pub enum Statement {
     Empty,
-    Item(Item),
+    /// A local (let) binding.
     Let(LetStmt),
-    Expr,
+    /// An item definition.
+    Item(Item),
+    /// Expr without trailing semicolon.
+    Expr(Expr),
+    /// Expression with trailing semicolon.
+    Semi(Expr),
 }
 
 #[derive(Debug, Clone)]
 pub enum Item {
-    Use(UseStmt),
-    Struct(StructItem),
+    Use(ItemUse),
+    Struct(ItemStruct),
+    Fn(ItemFn),
 }
 
 #[derive(Debug, Clone)]
-pub struct UseStmt {
-    pub items: Vec<UseItem>,
+pub struct ItemUse {
+    pub items: Vec<UsePath>,
 }
 
 #[derive(Debug, Clone)]
-pub struct UseItem {
+pub struct UsePath {
     pub path: Vec<PathSegment>,
     pub alias: Option<Ident>,
 }
@@ -37,11 +43,11 @@ pub struct UseTree {
 }
 
 impl UseTree {
-    pub fn flat(self) -> Vec<UseItem> {
+    pub fn flat(self) -> Vec<UsePath> {
         let mut ret = Vec::new();
 
         if self.children.is_empty() {
-            ret.push(UseItem {
+            ret.push(UsePath {
                 path: self.path,
                 alias: self.alias,
             });
@@ -63,7 +69,7 @@ impl UseTree {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum PathSegment {
     Ident(Ident),
     PathSuper,
@@ -83,7 +89,44 @@ impl Display for PathSegment {
 }
 
 #[derive(Debug, Clone)]
-pub struct StructItem {
+pub struct Block {
+    pub stmts: Vec<Statement>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ItemFn {
+    pub vis: Visibility,
+    pub sig: Signature,
+    pub block: Block,
+}
+
+#[derive(Debug, Clone)]
+pub struct Signature {
+    pub name: Ident,
+    pub inputs: Vec<FnArg>,
+    pub output: Option<Type>,
+}
+
+#[derive(Debug, Clone)]
+pub enum FnArg {
+    Receiver(Receiver),
+    Typed(PatType),
+}
+
+#[derive(Debug, Clone)]
+pub struct Receiver {
+    pub reference: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct PatType {
+    pub name: Ident,
+    pub ty: Type,
+}
+
+
+#[derive(Debug, Clone)]
+pub struct ItemStruct {
     pub name: Ident,
     pub fields: Vec<StructField>,
 }
@@ -92,7 +135,7 @@ pub struct StructItem {
 pub struct StructField {
     pub visibility: Visibility,
     pub name: Ident,
-    pub ty: Ty,
+    pub ty: Type,
 }
 
 #[derive(Debug, Clone)]
@@ -108,9 +151,11 @@ impl Default for Visibility {
 }
 
 #[derive(Debug, Clone)]
-pub enum Ty {
+pub enum Type {
     Primitive(PrimitiveTy),
-    TypePath(TypePath),
+    Array(TypeArray),
+    Path(TypePath),
+    Reference(Box<Type>),
 }
 
 #[derive(Debug, Clone)]
@@ -123,6 +168,14 @@ pub enum PrimitiveTy {
     Str,
 }
 
+/// A fixed size array type: `[T; n]`.
+#[derive(Debug, Clone)]
+pub struct TypeArray {
+    pub elem: Box<Type>,
+    pub len: Box<Expr>,
+}
+
+/// A path like `std::slice::Iter`
 #[derive(Debug, Clone)]
 pub struct TypePath {
     pub path: Vec<PathSegment>,
@@ -131,43 +184,6 @@ pub struct TypePath {
 #[derive(Debug, Clone)]
 pub struct LetStmt {
     pub var: Ident,
-    pub ty: Option<Ty>,
-    pub expr: Option<Expr>,
+    pub ty: Option<Type>,
+    pub expr: Option<Box<Expr>>,
 }
-
-// #[derive(Debug, Clone, PartialEq)]
-// pub struct LoopStmt {
-//     pub block: BlockExpr,
-// }
-
-// #[derive(Debug, Clone, PartialEq)]
-// pub struct WhileStmt {
-//     pub condition: Expr,
-//     pub block: BlockExpr,
-// }
-
-// #[derive(Debug, Clone, PartialEq)]
-// pub struct IfStmt {
-//     pub condition: Expr,
-//     pub block: BlockExpr,
-// }
-
-// #[derive(Debug, Clone, PartialEq)]
-// pub struct StructDefStmt {
-//     pub name: Ident,
-//     pub fields: Vec<VarDecl>,
-// }
-
-// #[derive(Debug, Clone, PartialEq)]
-// pub struct VarDecl {
-//     pub name: Ident,
-//     pub ty: Ident,
-// }
-
-// #[derive(Debug, Clone, PartialEq)]
-// pub struct FuncDefStmt {
-//     pub name: String,
-//     pub params: Vec<VarDecl>,
-//     pub ret_type: String,
-//     pub block: BlockExpr,
-// }

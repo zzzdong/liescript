@@ -131,6 +131,7 @@ pub enum OpKind {
     Access,
     Cast,
     Decl,
+    Path,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -144,6 +145,7 @@ pub enum BinOp {
     Access(AccessOp),
     CastOp,
     DeclOp,
+    PathOp,
 }
 
 impl BinOp {
@@ -186,6 +188,8 @@ impl BinOp {
             Symbol::PathSep => Ok(BinOp::Access(AccessOp::Path)),
             // type decl
             Symbol::Colon => Ok(BinOp::DeclOp),
+            // path op
+            Symbol::PathSep => Ok(BinOp::PathOp),
             _ => Err("unknown bin op"),
         }
     }
@@ -201,6 +205,7 @@ impl BinOp {
             BinOp::Access(_op) => OpKind::Access,
             BinOp::CastOp => OpKind::Cast,
             BinOp::DeclOp => OpKind::Decl,
+            BinOp::PathOp => OpKind::Path,
         }
     }
 }
@@ -217,6 +222,7 @@ impl fmt::Display for BinOp {
             BinOp::Access(op) => write!(f, "{}", op.as_str()),
             BinOp::CastOp => write!(f, "as"),
             BinOp::DeclOp => write!(f, ":"),
+            BinOp::PathOp => write!(f, "::"),
         }
     }
 }

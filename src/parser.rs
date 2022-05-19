@@ -1,7 +1,11 @@
-use std::borrow::Cow;
 use std::fmt;
+use std::{borrow::Cow, path::Path};
 use tracing::debug;
 
+use crate::ast::nodes::{
+    Block, ExprBlock, ExprIf, FnArg, ItemFn, PatType, Receiver, Signature, TypeArray,
+};
+use crate::tokenizer::Tokenizer;
 use crate::{
     ast::{
         nodes::{
@@ -9,8 +13,8 @@ use crate::{
                 ArrayExpr, BinOpExpr, Expr, FuncCallExpr, IndexExpr, LiteralExpr, PostfixOpExpr,
                 PrefixOpExpr,
             },
-            Ast, AstNode, Item, LetStmt, PathSegment, PrimitiveTy, Statement, StructField,
-            StructItem, Ty, TypePath, UseItem, UseStmt, UseTree, Visibility,
+            Ast, Item, ItemStruct, ItemUse, LetStmt, PathSegment, PrimitiveTy, Statement,
+            StructField, Type, TypePath, UsePath, UseTree, Visibility,
         },
         op::{
             AccessOp, AssignOp, BinOp, BitOp, CompOp, LogOp, NumOp, PostfixOp, PrefixOp, RangeOp,
@@ -38,14 +42,14 @@ impl ParseError {
         let tok = &found.kind;
 
         ParseError::Error(Cow::Owned(format!(
-            "expected {expected}, but found {tok} @ {}",
+            "expected {expected}, but found `{tok}` @ {}",
             span
         )))
     }
 
     pub(crate) fn unexpect_kind(expected: impl std::fmt::Display, found: &TokenKind) -> Self {
         ParseError::Error(Cow::Owned(format!(
-            "expected {expected}, but found {found:?}"
+            "expected {expected}, but found `{found:?}`"
         )))
     }
 
@@ -67,7 +71,7 @@ enum PathNode {
 }
 
 impl PathNode {
-    fn flat(nodes: Vec<PathNode>) -> Vec<UseItem> {
+    fn flat(nodes: Vec<PathNode>) -> Vec<UsePath> {
         let mut alias = None;
         let mut stack = Vec::new();
 
@@ -96,7 +100,7 @@ impl PathNode {
             }
         }
 
-        vec![UseItem { path: stack, alias }]
+        vec![UsePath { path: stack, alias }]
     }
 }
 
@@ -131,17 +135,17 @@ struct Parser {
 }
 
 impl Parser {
-    pub fn new(input: TokenStream) -> Self {
+    pub fn new(input: &str) -> Self {
+        let ts = Tokenizer::new(input).token_stream().unwrap();
+
         Parser {
-            input,
+            input: ts,
             last_span: None,
         }
     }
 
     pub fn parse_top_level(&mut self) -> Result<Ast, ParseError> {
-        let mut ast = Ast {
-            children: Vec::new(),
-        };
+        let mut stmts = Vec::new();
 
         loop {
             if self.is_eof() {
@@ -151,33 +155,45 @@ impl Parser {
             let tok = self.peek_token()?;
 
             match tok.kind {
-                TokenKind::Keyword(kw) => match kw {
-                    Keyword::Use => {
-                        let item = self.parse_use_stmt()?;
-                        self.expect_token(TokenKind::Symbol(Symbol::Semicolon))?;
-                        ast.children
-                            .push(AstNode::Statement(Statement::Item(Item::Use(item))));
+                TokenKind::Keyword(Keyword::Let) => {
+                    let local = self.parse_let_stmt()?;
+                    stmts.push(Statement::Let(local));
+                }
+                TokenKind::Keyword(Keyword::Use) => {
+                    let item = self.parse_use_stmt()?;
+                    self.expect_token(TokenKind::Symbol(Symbol::Semicolon))?;
+                    stmts.push(Statement::Item(Item::Use(item)));
+                }
+                TokenKind::Keyword(Keyword::Struct) => {
+                    let item = self.parse_struct_item()?;
+                    stmts.push(Statement::Item(Item::Struct(item)));
+                }
+                TokenKind::Keyword(Keyword::Fn) => {
+                    let item = self.parse_fn_item()?;
+                    stmts.push(Statement::Item(Item::Fn(item)));
+                }
+                TokenKind::Symbol(Symbol::Semicolon) => {
+                    stmts.push(Statement::Empty);
+                }
+                _ => {
+                    let expr = self.parse_expr()?;
+                    if self.next_token(&TokenKind::Symbol(Symbol::Semicolon)) {
+                        stmts.push(Statement::Semi(expr));
+                    } else {
+                        stmts.push(Statement::Expr(expr));
                     }
-                    Keyword::Struct => {
-                        let item = self.parse_struct_item()?;
-                        ast.children
-                            .push(AstNode::Statement(Statement::Item(Item::Struct(item))));
-                    }
-                    _ => return Err(ParseError::unexpect("top level keyword", &tok)),
-                },
-
-                _ => return Err(ParseError::unexpect("top level keyword", &tok)),
+                }
             }
         }
 
-        Ok(ast)
+        Ok(Ast { stmts })
     }
 
-    pub fn parse_use_stmt(&mut self) -> Result<UseStmt, ParseError> {
+    pub fn parse_use_stmt(&mut self) -> Result<ItemUse, ParseError> {
         self.expect_token(TokenKind::Keyword(Keyword::Use))?;
         let use_tree = self.parse_use_tree()?;
 
-        Ok(UseStmt {
+        Ok(ItemUse {
             items: PathNode::flat(use_tree),
         })
     }
@@ -209,7 +225,113 @@ impl Parser {
         }
     }
 
-    pub fn parse_struct_item(&mut self) -> Result<StructItem, ParseError> {
+    pub fn parse_fn_item(&mut self) -> Result<ItemFn, ParseError> {
+        let sig = self.parse_fn_signature()?;
+        let block = self.parse_block()?;
+
+        Ok(ItemFn {
+            vis: Visibility::Pub,
+            sig,
+            block,
+        })
+    }
+
+    pub fn parse_fn_signature(&mut self) -> Result<Signature, ParseError> {
+        self.expect_token(TokenKind::Keyword(Keyword::Fn))?;
+
+        let name = self.parse_ident()?;
+
+        self.expect_token(TokenKind::Symbol(Symbol::LParen))?;
+
+        let inputs = self.separated_list0(Symbol::Comma, Parser::parse_fn_arg, Symbol::RParen)?;
+
+        self.expect_token(TokenKind::Symbol(Symbol::RParen))?;
+
+        let output = if self.next_token(&TokenKind::Symbol(Symbol::RArrow)) {
+            let ty = self.parse_type()?;
+            Some(ty)
+        } else {
+            None
+        };
+
+        Ok(Signature {
+            name,
+            inputs,
+            output,
+        })
+    }
+
+    pub fn parse_block(&mut self) -> Result<Block, ParseError> {
+        self.expect_token(TokenKind::Symbol(Symbol::LBrace))?;
+
+        let mut stmts = Vec::new();
+
+        loop {
+            let tok = self.peek_token()?;
+
+            match tok.kind {
+                TokenKind::Keyword(Keyword::Let) => {
+                    let local = self.parse_let_stmt()?;
+                    stmts.push(Statement::Let(local));
+                }
+                TokenKind::Keyword(Keyword::Use) => {
+                    let item = self.parse_use_stmt()?;
+                    self.expect_token(TokenKind::Symbol(Symbol::Semicolon))?;
+                    stmts.push(Statement::Item(Item::Use(item)));
+                }
+                TokenKind::Keyword(Keyword::Struct) => {
+                    let item = self.parse_struct_item()?;
+                    stmts.push(Statement::Item(Item::Struct(item)));
+                }
+                TokenKind::Keyword(Keyword::Fn) => {
+                    let item = self.parse_fn_item()?;
+                    stmts.push(Statement::Item(Item::Fn(item)));
+                }
+                TokenKind::Symbol(Symbol::Semicolon) => {
+                    stmts.push(Statement::Empty);
+                }
+                TokenKind::Symbol(Symbol::RBrace) => {
+                    break;
+                }
+                _ => {
+                    let expr = self.parse_expr()?;
+                    if self.next_token(&TokenKind::Symbol(Symbol::Semicolon)) {
+                        stmts.push(Statement::Semi(expr));
+                    } else {
+                        stmts.push(Statement::Expr(expr));
+                    }
+                }
+            }
+        }
+
+        self.expect_token(TokenKind::Symbol(Symbol::RBrace))?;
+
+        Ok(Block { stmts })
+    }
+
+    fn parse_fn_arg(&mut self) -> Result<FnArg, ParseError> {
+        let tok = self.peek_token()?;
+
+        Ok(match tok.kind {
+            TokenKind::Keyword(Keyword::SelfValue) => {
+                self.consume_token()?;
+                FnArg::Receiver(Receiver { reference: false })
+            }
+            TokenKind::Symbol(Symbol::And) => {
+                self.consume_token()?;
+                self.expect_token(TokenKind::Keyword(Keyword::SelfValue))?;
+                FnArg::Receiver(Receiver { reference: true })
+            }
+            _ => {
+                let name = self.parse_ident()?;
+                self.expect_token(TokenKind::Symbol(Symbol::Colon))?;
+                let ty = self.parse_type()?;
+                FnArg::Typed(PatType { name, ty })
+            }
+        })
+    }
+
+    pub fn parse_struct_item(&mut self) -> Result<ItemStruct, ParseError> {
         self.expect_token(TokenKind::Keyword(Keyword::Struct))?;
 
         let name = self.parse_ident()?;
@@ -221,7 +343,7 @@ impl Parser {
 
         self.expect_token(TokenKind::Symbol(Symbol::RBrace))?;
 
-        Ok(StructItem { name, fields })
+        Ok(ItemStruct { name, fields })
     }
 
     fn parse_struct_field(&mut self) -> Result<StructField, ParseError> {
@@ -230,7 +352,7 @@ impl Parser {
         let name = self.parse_ident()?;
         self.expect_token(TokenKind::Symbol(Symbol::Colon))?;
 
-        let ty = self.parse_ty()?;
+        let ty = self.parse_type()?;
 
         Ok(StructField {
             visibility,
@@ -239,13 +361,41 @@ impl Parser {
         })
     }
 
-    fn parse_ty(&mut self) -> Result<Ty, ParseError> {
-        let ty = match self.try_primitive() {
-            Some(ty) => Ty::Primitive(ty),
-            None => Ty::TypePath(self.parse_type_path()?),
-        };
+    fn parse_type(&mut self) -> Result<Type, ParseError> {
+        let tok = self.peek_token()?;
 
-        Ok(ty)
+        Ok(match tok.kind {
+            TokenKind::Keyword(kw) => {
+                self.consume_token()?;
+                match kw {
+                    Keyword::Bool => Type::Primitive(PrimitiveTy::Bool),
+                    Keyword::Byte => Type::Primitive(PrimitiveTy::Byte),
+                    Keyword::Char => Type::Primitive(PrimitiveTy::Char),
+                    Keyword::Int => Type::Primitive(PrimitiveTy::Int),
+                    Keyword::Float => Type::Primitive(PrimitiveTy::Float),
+                    Keyword::Str => Type::Primitive(PrimitiveTy::Str),
+                    _ => return Err(ParseError::unexpect("type", &tok)),
+                }
+            }
+            TokenKind::Symbol(Symbol::And) => {
+                self.consume_token()?;
+                let ty = self.parse_type()?;
+                Type::Reference(Box::new(ty))
+            }
+            TokenKind::Symbol(Symbol::LBracket) => {
+                self.consume_token()?;
+                let ty = self.parse_type()?;
+                self.expect_token(TokenKind::Symbol(Symbol::Semicolon))?;
+                let len = Box::new(self.parse_expr()?);
+                self.expect_token(TokenKind::Symbol(Symbol::RBracket))?;
+
+                Type::Array(TypeArray {
+                    elem: Box::new(ty),
+                    len,
+                })
+            }
+            _ => Type::Path(self.parse_type_path()?),
+        })
     }
 
     fn parse_let_stmt(&mut self) -> Result<LetStmt, ParseError> {
@@ -254,13 +404,13 @@ impl Parser {
         let var = self.parse_ident()?;
 
         let ty = if self.next_token(&TokenKind::Symbol(Symbol::Colon)) {
-            Some(self.parse_ty()?)
+            Some(self.parse_type()?)
         } else {
             None
         };
 
         let expr = if self.next_token(&TokenKind::Symbol(Symbol::Eq)) {
-            Some(self.parse_expr()?)
+            Some(Box::new(self.parse_expr()?))
         } else {
             None
         };
@@ -351,24 +501,58 @@ impl Parser {
     }
 
     fn parse_primary(&mut self) -> Result<Expr, ParseError> {
-        let tok = self.consume_token()?;
+        let tok = self.peek_token()?;
 
         match tok.kind {
-            TokenKind::Literal(lit) => Ok(Expr::Literal(lit.into())),
-            TokenKind::Ident(ident) => Ok(Expr::Ident(ident.into())),
+            TokenKind::Literal(lit) => {
+                self.consume_token()?;
+                Ok(Expr::Literal(lit.into()))
+            }
+            TokenKind::Ident(ident) => {
+                self.consume_token()?;
+                Ok(Expr::Ident(ident.into()))
+            }
             TokenKind::Symbol(Symbol::LParen) => {
+                self.consume_token()?;
                 let expr = self.parse_subexpr(Precedence::Lowest)?;
                 self.expect_token(TokenKind::Symbol(Symbol::RParen))?;
                 Ok(expr)
             }
             TokenKind::Symbol(Symbol::LBracket) => {
+                self.consume_token()?;
                 let items =
                     self.separated_list0(Symbol::Comma, Parser::parse_expr, Symbol::RBracket)?;
                 self.expect_token(TokenKind::Symbol(Symbol::RBracket))?;
-                Ok(Expr::Array(ArrayExpr { items }))
+                Ok(Expr::Array(ArrayExpr { elems: items }))
             }
+            TokenKind::Symbol(Symbol::LBrace) => self.parse_expr_block().map(Expr::Block),
+            TokenKind::Keyword(Keyword::If) => self.parse_expr_if().map(Expr::If),
+
             _ => Err(ParseError::unexpect("primary", &tok)),
         }
+    }
+
+    fn parse_expr_if(&mut self) -> Result<ExprIf, ParseError> {
+        self.expect_token(TokenKind::Keyword(Keyword::If))?;
+        let cond = Box::new(self.parse_expr()?);
+        let then_branch = self.parse_block()?;
+        let else_branch = if self.next_token(&TokenKind::Keyword(Keyword::Else)) {
+            Some(Box::new(self.parse_expr()?))
+        } else {
+            None
+        };
+
+        Ok(ExprIf {
+            cond,
+            then_branch,
+            else_branch,
+        })
+    }
+
+    fn parse_expr_block(&mut self) -> Result<ExprBlock, ParseError> {
+        let block = self.parse_block()?;
+
+        Ok(ExprBlock { block })
     }
 
     fn next_precedence(&mut self) -> Result<Precedence, ParseError> {
@@ -382,10 +566,12 @@ impl Parser {
                 Symbol::Star | Symbol::Slash | Symbol::Percent => Precedence::Factor,
                 Symbol::LParen | Symbol::LBracket => Precedence::Call,
                 Symbol::Dot => Precedence::Call,
+                Symbol::Eq => Precedence::Equal,
                 Symbol::Gt | Symbol::GtE | Symbol::Lt | Symbol::LtE | Symbol::EqEq => {
                     Precedence::Compare
                 }
                 Symbol::Question => Precedence::Postfix,
+                Symbol::PathSep => Precedence::Path,
                 _ => Precedence::Lowest,
             },
             _ => Precedence::Lowest,
@@ -533,12 +719,13 @@ impl Parser {
     }
 
     /// Consume next token, and check it with pattern
-    fn expect_token<T, P>(&mut self, pat: P) -> Result<T, ParseError>
-    where
-        P: Pattern<Output = T>,
-    {
+    fn expect_token(&mut self, kind: TokenKind) -> Result<Token, ParseError> {
         let tok = self.consume_token()?;
-        pat.parse(tok.kind)
+        if tok.kind == kind {
+            Ok(tok)
+        } else {
+            Err(ParseError::unexpect(kind, &tok))
+        }
     }
 
     /// Peek next token without cunsume it
@@ -563,40 +750,9 @@ impl Parser {
     }
 }
 
-trait Pattern {
-    type Output;
-    fn parse(self, tok: TokenKind) -> Result<Self::Output, ParseError>;
-}
-
-impl Pattern for TokenKind {
-    type Output = TokenKind;
-
-    fn parse(self, tok: TokenKind) -> Result<TokenKind, ParseError> {
-        if tok == self {
-            Ok(tok)
-        } else {
-            Err(ParseError::unexpect_kind(format!("{self:?}"), &tok))
-        }
-    }
-}
-
-impl<F> Pattern for F
-where
-    F: Fn(TokenKind) -> Result<TokenKind, ParseError>,
-{
-    type Output = TokenKind;
-
-    fn parse(self, tok: TokenKind) -> Result<TokenKind, ParseError> {
-        self(tok)
-    }
-}
-
 #[cfg(test)]
 mod test {
-    use crate::{
-        parser::{Parser, PathNode},
-        tokenizer::Tokenizer,
-    };
+    use crate::parser::{Parser, PathNode};
 
     #[test]
     fn parse_use_tree() {
@@ -614,9 +770,7 @@ mod test {
         ];
 
         for input in inputs {
-            let i = Tokenizer::new("", input.0).token_stream().unwrap();
-
-            let mut parser = Parser::new(i);
+            let mut parser = Parser::new(input.0);
 
             let ret = parser.parse_use_tree();
 
@@ -645,9 +799,7 @@ mod test {
         ];
 
         for input in inputs {
-            let i = Tokenizer::new("", input.0).token_stream().unwrap();
-
-            let mut parser = Parser::new(i.clone());
+            let mut parser = Parser::new(input.0);
 
             println!("=> {:?}", parser.parse_use_stmt());
         }
@@ -661,12 +813,22 @@ mod test {
                 r"struct A { a: int, pub b: float, priv c:byte, priv d: AAA}",
                 true,
             ),
+            (
+                r"struct A { 
+                    a: int,
+                    pub b: float,
+                    priv c: AAA,
+                    priv d: std::json,
+                    pub e: &std::json,
+                    pub f: [int; 2],
+                    pub g: &[float; 4]
+                }",
+                true,
+            ),
         ];
 
         for input in inputs {
-            let i = Tokenizer::new("", input.0).token_stream().unwrap();
-
-            let mut parser = Parser::new(i.clone());
+            let mut parser = Parser::new(input.0);
 
             println!("=> {:?}", parser.parse_struct_item());
         }
@@ -674,12 +836,6 @@ mod test {
 
     #[test]
     fn parse_expr() {
-        tracing_subscriber::fmt()
-            // filter spans/events with level TRACE or higher.
-            .with_max_level(tracing::Level::DEBUG)
-            // build but do not install the subscriber.
-            .finish();
-
         let inputs = [
             "a+b",
             "a+b*c",
@@ -699,12 +855,11 @@ mod test {
             "a()?",
             "a.b?",
             "-a.b?",
+            "a=b",
         ];
 
         for input in &inputs {
-            let ts = Tokenizer::new("", input).token_stream().unwrap();
-
-            let mut parser = Parser::new(ts.clone());
+            let mut parser = Parser::new(input);
 
             println!("=> {:?}", parser.parse_expr());
         }
@@ -720,9 +875,7 @@ mod test {
         ];
 
         for input in &inputs {
-            let ts = Tokenizer::new("", input).token_stream().unwrap();
-
-            let mut parser = Parser::new(ts.clone());
+            let mut parser = Parser::new(input);
 
             let ret = parser.parse_let_stmt();
 
@@ -734,14 +887,19 @@ mod test {
     fn test_parse() {
         use std::fs;
 
+        tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::ERROR)
+            // build but do not install the subscriber.
+            .finish();
+
         let content = fs::read_to_string("scripts/hello.lie").unwrap();
 
-        let ts = Tokenizer::new("", &content).token_stream().unwrap();
-
-        let mut parser = Parser::new(ts.clone());
+        let mut parser = Parser::new(&content);
 
         let ret = parser.parse_top_level();
 
         println!("=> {ret:?}");
+
+        ret.unwrap().print();
     }
 }

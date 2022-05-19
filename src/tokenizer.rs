@@ -7,12 +7,12 @@ use crate::ast::{Ident, Keyword, Literal, Symbol};
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub struct Span {
-    pub start: LineCol,
-    pub end: LineCol,
+    pub start: Pos,
+    pub end: Pos,
 }
 
 impl Span {
-    pub fn new(start: LineCol, end: LineCol) -> Self {
+    pub fn new(start: Pos, end: Pos) -> Self {
         Span { start, end }
     }
 }
@@ -28,16 +28,18 @@ impl fmt::Display for Span {
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
-pub struct LineCol {
-    pub pos: usize,
+pub struct Pos {
+    pub file: usize,
+    pub offset: usize,
     pub line: usize,
     pub column: usize,
 }
 
-impl LineCol {
+impl Pos {
     pub fn new() -> Self {
-        LineCol {
-            pos: 0,
+        Pos {
+            file: 0,
+            offset: 0,
             line: 1,
             column: 1,
         }
@@ -144,34 +146,32 @@ impl TokenKind {
 pub struct Tokenizer<'i> {
     chars: Chars<'i>,
     input: &'i str,
-    offset: usize,
-    location: LineCol,
+    pos: Pos,
 }
 
 impl<'i> Tokenizer<'i> {
-    pub fn new(filename: &'i str, input: &'i str) -> Self {
+    pub fn new(input: &'i str) -> Self {
         let chars = input.chars();
 
         Tokenizer {
             chars,
-            offset: 0,
             input,
-            location: LineCol::new(),
+            pos: Pos::new(),
         }
     }
 
-    fn location(&self) -> (usize, LineCol) {
-        (self.offset, self.location)
+    fn pos(&self) ->  Pos {
+        self.pos
     }
 
-    fn new_token(&self, start: (usize, LineCol), kind: TokenKind) -> Token {
-        let span = Span::new(start.1, self.location);
+    fn new_token(&self, start: Pos, kind: TokenKind) -> Token {
+        let span = Span::new(start, self.pos);
 
         Token::new(span, kind)
     }
 
     pub fn next_token(&mut self) -> Result<Token, TokenError> {
-        let start = self.location();
+        let start = self.pos();
 
         self.next_token_inner()
             .map(|kind| self.new_token(start, kind))
@@ -218,13 +218,12 @@ impl<'i> Tokenizer<'i> {
 
     fn next_char(&mut self) -> Option<char> {
         self.chars.next().map(|c| {
-            self.offset += c.len_utf8();
-            self.location.pos = self.offset;
+            self.pos.offset += c.len_utf8();
             if c == '\n' {
-                self.location.line += 1;
-                self.location.column = 1;
+                self.pos.line += 1;
+                self.pos.column = 1;
             } else {
-                self.location.column += 1;
+                self.pos.column += 1;
             }
             c
         })
@@ -283,7 +282,6 @@ impl<'i> Tokenizer<'i> {
     }
 
     fn eat_number(&mut self) -> Result<TokenKind, TokenError> {
-        let start = self.offset;
         let mut is_float = false;
 
         let num = self.eat_while(|c| {
@@ -312,7 +310,6 @@ impl<'i> Tokenizer<'i> {
     }
 
     fn eat_char(&mut self) -> Result<TokenKind, TokenError> {
-        let pos = self.offset;
         let s = self.eat_qoutes('\'')?;
 
         if s.chars().count() == 1 {
@@ -386,7 +383,7 @@ impl<'i> Tokenizer<'i> {
         let _open = self.next_char().unwrap();
 
         loop {
-            let start = self.location();
+            let start = self.pos();
 
             let token = self.next_token()?;
 
@@ -527,7 +524,6 @@ impl<'i> Iterator for TokenStreamIter<'i> {
         self.iter.next().cloned()
     }
 }
-
 #[cfg(test)]
 mod test {
     use super::*;
@@ -573,7 +569,7 @@ mod test {
         ];
 
         for i in &inputs {
-            let mut tokenizer = Tokenizer::new("", i.0);
+            let mut tokenizer = Tokenizer::new(i.0);
 
             let mut ret = Vec::new();
 
@@ -601,7 +597,7 @@ mod test {
         let mut input = String::new();
         file.read_to_string(&mut input).unwrap();
 
-        let tokenizer = Tokenizer::new(filepath, &input);
+        let tokenizer = Tokenizer::new(&input);
 
         for t in tokenizer {
             println!("{:?}", t);

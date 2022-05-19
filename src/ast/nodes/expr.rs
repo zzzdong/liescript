@@ -4,11 +4,11 @@ use crate::ast::{
 };
 use std::fmt;
 
-use super::AstNode;
+use super::Block;
 
 const LEVEL_INDENT: usize = 2;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum Expr {
     Ident(IdentExpr),
     Literal(LiteralExpr),
@@ -18,9 +18,8 @@ pub enum Expr {
     Index(IndexExpr),
     Array(ArrayExpr),
     FuncCall(FuncCallExpr),
-    Block(BlockExpr),
-    Completed,
-    Eof,
+    Block(ExprBlock),
+    If(ExprIf),
 }
 
 impl Expr {
@@ -193,7 +192,7 @@ impl Expr {
                 }
                 node
             }
-            Expr::Array(ArrayExpr { items }) => {
+            Expr::Array(ArrayExpr { elems: items }) => {
                 let node = graph.add_node("ArrayExpr".into());
 
                 for item in items {
@@ -211,11 +210,6 @@ impl Expr {
                 let node = graph.add_node(format!("{ident:?}"));
                 node
             }
-
-            Expr::Eof => {
-                let node = graph.add_node("EOF".into());
-                node
-            }
             _ => {
                 unimplemented!("{expr:?}")
             }
@@ -229,48 +223,48 @@ impl fmt::Display for Expr {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct BlockExpr {
     // pub block: Vec<AstNode>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct ArrayExpr {
-    pub items: Vec<Expr>,
+    pub elems: Vec<Expr>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct IndexExpr {
     pub name: Box<Expr>,
     pub rhs: Box<Expr>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct FuncCallExpr {
     pub name: Box<Expr>,
     pub args: Vec<Expr>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct PrefixOpExpr {
     pub op: PrefixOp,
     pub rhs: Box<Expr>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct PostfixOpExpr {
     pub op: PostfixOp,
     pub lhs: Box<Expr>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct BinOpExpr {
     pub op: BinOp,
     pub lhs: Box<Expr>,
     pub rhs: Box<Expr>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct LiteralExpr(Literal);
 
 impl From<Literal> for LiteralExpr {
@@ -279,7 +273,7 @@ impl From<Literal> for LiteralExpr {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct IdentExpr(Ident);
 
 impl IdentExpr {
@@ -292,4 +286,18 @@ impl From<Ident> for IdentExpr {
     fn from(i: Ident) -> Self {
         IdentExpr(i)
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct ExprIf {
+    pub cond: Box<Expr>,
+    pub then_branch: Block,
+    pub else_branch: Option<Box<Expr>>,
+}
+
+
+
+#[derive(Debug, Clone)]
+pub struct ExprBlock {
+    pub block: Block,
 }

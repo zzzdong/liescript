@@ -13,11 +13,23 @@ struct Data {
 }
 
 
-// fn hello() {
-//     std::fmt::println("Hello, world!");
-// }
-// 
-// 
-// fn main() {
-//     hello();
-// }
+fn hello() {
+    std::fmt::println("Hello, world!");
+}
+
+
+fn fib(n: int) -> int {
+    r = if n == 0 {
+        0
+    } else {
+        if n == 1 {
+            1
+        } else {
+            recursive_fib(n - 1) + recursive_fib(n - 2)
+        }
+    }
+}
+
+fn main() {
+    hello();
+}
