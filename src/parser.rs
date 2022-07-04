@@ -1,28 +1,8 @@
-use std::fmt;
-use std::{borrow::Cow, path::Path};
-use tracing::debug;
+use log::debug;
+use std::borrow::Cow;
 
-use crate::ast::nodes::{
-    Block, ExprBlock, ExprIf, FnArg, ItemFn, PatType, Receiver, Signature, TypeArray,
-};
-use crate::tokenizer::Tokenizer;
-use crate::{
-    ast::{
-        nodes::{
-            expr::{
-                ArrayExpr, BinOpExpr, Expr, FuncCallExpr, IndexExpr, LiteralExpr, PostfixOpExpr,
-                PrefixOpExpr,
-            },
-            Ast, Item, ItemStruct, ItemUse, LetStmt, PathSegment, PrimitiveTy, Statement,
-            StructField, Type, TypePath, UsePath, UseTree, Visibility,
-        },
-        op::{
-            AccessOp, AssignOp, BinOp, BitOp, CompOp, LogOp, NumOp, PostfixOp, PrefixOp, RangeOp,
-        },
-        Ident, Keyword, Literal, Symbol,
-    },
-    tokenizer::{Span, Token, TokenError, TokenKind, TokenStream},
-};
+use crate::ast::*;
+use crate::tokenizer::{Span, Token, TokenError, TokenKind, TokenStream, Tokenizer};
 
 #[derive(Debug)]
 pub enum ParseError {
@@ -887,10 +867,9 @@ mod test {
     fn test_parse() {
         use std::fs;
 
-        tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::ERROR)
-            // build but do not install the subscriber.
-            .finish();
+        env_logger::builder()
+            .filter_level(log::LevelFilter::Debug)
+            .init();
 
         let content = fs::read_to_string("scripts/hello.lie").unwrap();
 

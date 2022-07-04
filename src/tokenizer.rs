@@ -160,7 +160,7 @@ impl<'i> Tokenizer<'i> {
         }
     }
 
-    fn pos(&self) ->  Pos {
+    fn pos(&self) -> Pos {
         self.pos
     }
 

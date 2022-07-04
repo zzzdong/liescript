@@ -1,6 +1,6 @@
 use std::fmt;
 
-use super::Symbol;
+use crate::ast::symbol::Symbol;
 
 macro_rules! define_op {
     (

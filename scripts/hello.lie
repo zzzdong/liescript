@@ -1,10 +1,4 @@
-use std::net::TcpStream;
-use std::net::TcpStream as TcpSocket;
-use std::encoding::json;
-use std::fs::{open, close};
-use std::io::{Read, Write};
-
-
+use std::fmt;
 
 // DATA
 struct Data {
@@ -19,13 +13,13 @@ fn hello() {
 
 
 fn fib(n: int) -> int {
-    r = if n == 0 {
+    if n == 0 {
         0
     } else {
         if n == 1 {
             1
         } else {
-            recursive_fib(n - 1) + recursive_fib(n - 2)
+            fib(n - 1) + fib(n - 2)
         }
     }
 }

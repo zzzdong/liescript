@@ -124,7 +124,6 @@ pub struct PatType {
     pub ty: Type,
 }
 
-
 #[derive(Debug, Clone)]
 pub struct ItemStruct {
     pub name: Ident,

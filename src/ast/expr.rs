@@ -1,10 +1,10 @@
-use crate::ast::{
-    op::{BinOp, NumOp, PostfixOp, PrefixOp},
-    Ident, Literal,
-};
 use std::fmt;
 
-use super::Block;
+use crate::ast::{
+    op::{BinOp, NumOp, PostfixOp, PrefixOp},
+    stmt::Block,
+    Ident, Literal,
+};
 
 const LEVEL_INDENT: usize = 2;
 
@@ -294,8 +294,6 @@ pub struct ExprIf {
     pub then_branch: Block,
     pub else_branch: Option<Box<Expr>>,
 }
-
-
 
 #[derive(Debug, Clone)]
 pub struct ExprBlock {
