@@ -11,7 +11,7 @@ pub enum Statement {
     Let(LetStmt),
     /// An item definition.
     Item(Item),
-    /// Expr without trailing semicolon.
+    /// Expression without trailing semicolon.
     Expr(Expr),
     /// Expression with trailing semicolon.
     Semi(Expr),

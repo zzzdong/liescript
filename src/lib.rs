@@ -6,6 +6,7 @@ mod parser;
 mod tokenizer;
 mod value;
 mod vm;
+mod pest_parser;
 
 #[cfg(test)]
 mod tests {
