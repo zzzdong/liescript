@@ -6,7 +6,7 @@ use std::io::{self, BufRead};
 use crate::ast::Expr;
 
 #[derive(pest_derive::Parser)]
-#[grammar = "grammar.pest"]
+#[grammar = "parser/grammar.pest"]
 pub struct LieParser;
 
 // lazy_static::lazy_static! {

@@ -2,7 +2,7 @@ use log::debug;
 use std::borrow::Cow;
 
 use crate::ast::*;
-use crate::tokenizer::{Span, Token, TokenError, TokenKind, TokenStream, Tokenizer};
+use super::tokenizer::{Span, Token, TokenError, TokenKind, TokenStream, Tokenizer};
 
 #[derive(Debug)]
 pub enum ParseError {
@@ -732,7 +732,9 @@ impl Parser {
 
 #[cfg(test)]
 mod test {
-    use crate::parser::{Parser, PathNode};
+    use crate::parser::parser::{Parser, PathNode};
+
+    
 
     #[test]
     fn parse_use_tree() {
