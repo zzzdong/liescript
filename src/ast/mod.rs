@@ -1,5 +1,6 @@
 use std::fmt;
 
+pub mod ast;
 pub mod expr;
 pub mod ident;
 pub mod keyword;

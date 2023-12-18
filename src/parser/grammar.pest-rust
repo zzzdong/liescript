@@ -1,0 +1,886 @@
+/// The top-level rule of a grammar.
+program = _{ SOI ~ InnerAttribute* ~ Item* ~ EOI }
+
+// Attributes
+InnerAttribute = { Pound ~ Not ~ OpeningBrack ~ Attr ~ ClosingBrack }
+
+OuterAttribute = { Pound ~ OpeningBrack ~ Attr ~ ClosingBrack }
+
+Attr = { SimplePath ~ AttrInput? }
+
+AttrInput = { Eq ~ Expression }
+
+// Conditional compilation
+ConfigurationPredicate = {
+    ConfigurationOption
+  | ConfigurationAll
+  | ConfigurationAny
+  | ConfigurationNot
+}
+
+ConfigurationOption = { IDENTIFIER ~ (Eq ~ (STRING_LITERAL))? }
+
+ConfigurationAll = { "all" ~ OpeningParen ~ ConfigurationPredicateList? ~ ClosingParen }
+
+ConfigurationAny = { "any" ~ OpeningParen ~ ConfigurationPredicateList? ~ ClosingParen }
+
+ConfigurationNot = { "not" ~ OpeningParen ~ ConfigurationPredicate? ~ ClosingParen }
+
+ConfigurationPredicateList = { ConfigurationPredicate ~ (Comma ~ ConfigurationPredicate)* ~ Comma? }
+
+// Items
+
+Item = { OuterAttribute* ~ VisItem }
+
+VisItem = {
+    Visibility? ~ (Module | UseDeclaration | Function | TypeAlias | Struct | Enumeration | Union | ConstantItem | StaticItem | Trait | Implementation | ExternBlock)
+}
+
+Visibility = {
+    KW_PUB
+  | (KW_PUB ~ OpeningParen ~ KW_CRATE ~ ClosingParen)
+  | (KW_PUB ~ OpeningParen ~ KW_SELFVALUE ~ ClosingParen)
+  | (KW_PUB ~ OpeningParen ~ KW_SUPER ~ ClosingParen)
+}
+
+// Modules
+Module = { (KW_MOD ~ IDENTIFIER ~ Semi) | (KW_MOD ~ IDENTIFIER ~ OpeningBrace ~ InnerAttribute* ~ Item* ~ ClosingBrace) }
+
+// Use declarations
+UseDeclaration = { KW_USE ~ UseTree ~ Semi }
+
+UseTree = {
+    ((SimplePath? ~ PathSep)? ~ Star)
+  | ((SimplePath? ~ PathSep)? ~ OpeningBrace ~ (UseTree ~ (Comma ~ UseTree)* ~ Comma?)? ~ ClosingBrace)
+  | (SimplePath ~ (KW_AS ~ (IDENTIFIER | Underscore))?)
+}
+
+// Functions
+Function = {
+    FunctionQualifiers ~ KW_FN ~ IDENTIFIER ~ GenericParams? ~ OpeningParen ~ FunctionParameters? ~ ClosingParen ~ FunctionReturnType? ~ WhereClause? ~ (BlockExpression | Semi)
+}
+
+FunctionQualifiers = { KW_CONST? ~ KW_ASYNC? ~ KW_UNSAFE? ~ (KW_EXTERN ~ Abi?)? }
+
+Abi = { STRING_LITERAL }
+
+FunctionParameters = { (SelfParam ~ Comma?) | (SelfParam ~ Comma)? ~ FunctionParam ~ (Comma ~ FunctionParam)* ~ Comma? }
+
+SelfParam = { And? ~ KW_MUT? ~ KW_SELFVALUE }
+
+FunctionParam = { OuterAttribute* ~ (FunctionParamPattern | DotDotDot | Type) }
+
+FunctionParamPattern = { PatternNoTopAlt ~ Colon ~ (Type | DotDotDot) }
+
+FunctionReturnType = { RArrow ~ Type }
+
+// Type aliases
+TypeAlias = { KW_TYPE ~ IDENTIFIER ~ GenericParams? ~ (Eq ~ Type ~ WhereClause?)? }
+
+// Structs
+Struct = { StructStruct | TupleStruct }
+
+StructStruct = {
+    KW_STRUCT ~ IDENTIFIER ~ GenericParams? ~ WhereClause? ~ ((OpeningBrace ~ StructFields? ~ ClosingBrace) | Semi)
+}
+
+TupleStruct = {
+    KW_STRUCT ~ IDENTIFIER ~ GenericParams? ~ WhereClause? ~ (OpeningParen ~ TupleFields? ~ ClosingParen) ~ WhereClause?
+}
+
+StructFields = { StructField ~ (Comma ~ StructField)* ~ Comma? }
+
+StructField = { OuterAttribute* ~ Visibility? ~ IDENTIFIER ~ Colon ~ Type }
+
+TupleFields = { TupleField ~ (Comma ~ TupleField)* ~ Comma? }
+
+TupleField = { OuterAttribute* ~ Visibility? ~ Type }
+
+// Enumerations
+Enumeration = {
+    KW_ENUM ~ IDENTIFIER ~ GenericParams? ~ WhereClause? ~ OpeningBrace ~ EnumItems ~ ClosingBrace
+}
+
+EnumItems = { EnumItem ~ (Comma ~ EnumItem)* ~ Comma? }
+
+EnumItem = {
+    OuterAttribute* ~ Visibility? ~ IDENTIFIER ~ (EnumItemTuple | EnumItemStruct)? ~ EnumItemDiscriminant?
+}
+
+EnumItemTuple = { OpeningParen ~ TupleFields? ~ ClosingParen }
+
+EnumItemStruct = { OpeningBrace ~ StructFields? ~ ClosingBrace }
+
+EnumItemDiscriminant = { Eq ~ Expression }
+
+// Unions
+Union = {
+    KW_UNION ~ IDENTIFIER ~ GenericParams? ~ WhereClause? ~ OpeningBrace ~ StructFields ~ ClosingBrace
+}
+
+// Constant items
+ConstantItem = { KW_CONST ~ (IDENTIFIER | Underscore) ~ Colon ~ Type ~ (Eq ~ Expression)? ~ Semi }
+
+// Static items
+StaticItem = { KW_CONST ~ KW_MUT? ~ IDENTIFIER ~ Colon ~ Type ~ (Eq ~ Expression)? ~ Semi }
+
+// Traits
+Trait = {
+    KW_UNSAFE? ~ KW_TRAIT ~ IDENTIFIER ~ GenericParams? ~ (Colon ~ TypeParamBounds?)? ~ WhereClause? ~ OpeningBrace ~ InnerAttribute* ~ AssociatedItem* ~ ClosingBrace
+}
+
+// Implementations
+Implementation = { InherentImpl | TraitImpl }
+
+InherentImpl = {
+    KW_IMPL ~ GenericParams? ~ Type ~ WhereClause? ~ OpeningBrace ~ InnerAttribute* ~ AssociatedItem* ~ ClosingBrace
+}
+
+TraitImpl = {
+    KW_UNSAFE ~ KW_IMPL ~ GenericParams? ~ Not? ~ GenericParams? ~ KW_FOR ~ Type ~ WhereClause? ~ OpeningBrace ~ InnerAttribute* ~ AssociatedItem* ~ ClosingBrace
+}
+
+// External blocks
+ExternBlock = { KW_UNSAFE? ~ KW_EXTERN ~ Abi? ~ OpeningBrace ~ InnerAttribute* ~ ExternalItem* ~ ClosingBrace }
+
+ExternalItem = { OuterAttribute* ~ (Visibility? ~ (StaticItem | Function)) }
+
+// Generic parameters
+GenericParams = { (Lt ~ Gt) | (Lt ~ (GenericParam ~ Comma)* ~ GenericParam ~ Comma?) }
+
+GenericParam = { OuterAttribute* ~ (LifetimeParam | TypeParam | ConstParam) }
+
+LifetimeParam = { LIFETIME_OR_LABEL ~ (Colon ~ LifetimeBounds)? }
+
+TypeParam = { IDENTIFIER ~ (Colon ~ TypeParamBounds?)? ~ (Eq ~ Type)? }
+
+ConstParam = { KW_CONST ~ IDENTIFIER ~ Colon ~ Type ~ (Eq ~ (BlockExpression | IDENTIFIER | Minus? ~ LiteralExpression)?) }
+
+// Where clauses
+WhereClause = { KW_WHERE ~ (WhereClauseItem ~ Comma)* ~ WhereClauseItem? }
+
+WhereClauseItem = { LifetimeWhereClauseItem | TypeBoundWhereClauseItem }
+
+LifetimeWhereClauseItem = { Lifetime ~ Colon ~ LifetimeBounds }
+
+TypeBoundWhereClauseItem = { ForLifetimes? ~ Type ~ Colon ~ TypeParamBounds? }
+
+// Associated Items
+AssociatedItem = { OuterAttribute* ~ (Visibility? ~ (TypeAlias | ConstantItem | Function)) }
+
+// Statements
+Statement = {
+    Semi
+  | Item
+  | LetStatement
+  | ExpressionStatement
+}
+
+// let statements
+LetStatement = {
+    OuterAttribute* ~ KW_LET ~ PatternNoTopAlt ~ (Colon ~ Type)? ~ (Eq ~ Expression ~ (KW_ELSE ~ BlockExpression)?)? ~ Semi
+}
+
+// Expression statements
+ExpressionStatement = {
+    (ExpressionWithoutBlock ~ Semi)
+  | (ExpressionWithBlock ~ Semi?)
+}
+
+// Expressions
+
+Expression = {
+    ExpressionWithoutBlock
+  | ExpressionWithBlock
+}
+
+ExpressionWithoutBlock = {
+    OuterAttribute* ~ (LiteralExpression | PathExpression | OperatorExpression | GroupedExpression | ArrayExpression | AwaitExpression | IndexExpression | TupleExpression | TupleIndexingExpression | StructExpression | CallExpression | MethodCallExpression | FieldExpression | ClosureExpression | AsyncBlockExpression | ContinueExpression | BreakExpression | RangeExpression | ReturnExpression | UnderscoreExpression)
+}
+
+ExpressionWithBlock = {
+    OuterAttribute* ~ (BlockExpression | UnsafeBlockExpression | LoopExpression | IfExpression | IfLetExpression | MatchExpression)
+}
+
+// Literal expressions
+LiteralExpression = {
+    CHAR_LITERAL
+  | STRING_LITERAL // | RAW_STRING_LITERAL
+
+  | BYTE_LITERAL // | BYTE_STRING_LITERAL
+
+  | RAW_BYTE_STRING_LITERAL
+  | INTEGER_LITERAL
+  | FLOAT_LITERAL
+  | KW_TRUE
+  | KW_FALSE
+}
+
+CHAR_LITERAL            = { character }
+STRING_LITERAL          = { string }
+BYTE_LITERAL            = { "b" ~ character }
+RAW_BYTE_STRING_LITERAL = { "b" ~ string }
+INTEGER_LITERAL         = { integer }
+// TODO: float literal
+FLOAT_LITERAL = { float }
+
+// Path expressions
+PathExpression = { PathInExpression | QualifiedPathInExpression }
+
+// Block expressions
+BlockExpression = { OpeningBrace ~ InnerAttribute* ~ Statements? ~ ClosingBrace }
+
+Statements = { Statement+ | (Statement+ ~ ExpressionWithoutBlock) | ExpressionWithoutBlock }
+
+// async blocks
+AsyncBlockExpression = { KW_ASYNC ~ KW_MOVE? ~ BlockExpression }
+
+// unsafe blocks
+UnsafeBlockExpression = { KW_UNSAFE ~ BlockExpression }
+
+// Operator expressions
+OperatorExpression = {
+    BorrowExpression
+  | DereferenceExpression
+  | ErrorPropagationExpression
+  | NegationExpression
+  | ArithmeticOrLogicalExpression
+  | ComparisonExpression
+  | LazyBooleanExpression
+  | TypeCastExpression
+  | AssignmentExpression
+  | CompoundAssignmentExpression
+}
+
+// Borrow operators
+BorrowExpression = { ((And | AndAnd) ~ Expression) | (And | AndAnd) ~ KW_MUT ~ Expression }
+
+// The dereference operator
+DereferenceExpression = { Star ~ Expression }
+
+// The question mark operator
+ErrorPropagationExpression = { Expression ~ Question }
+
+// Negation operators
+NegationExpression = { (Minus ~ Expression) | (Not ~ Expression) }
+
+// Arithmetic and Logical Binary Operators
+ArithmeticOrLogicalExpression = {
+    (Expression ~ Plus ~ Expression)
+  | (Expression ~ Minus ~ Expression)
+  | (Expression ~ Star ~ Expression)
+  | (Expression ~ Slash ~ Expression)
+  | (Expression ~ Percent ~ Expression)
+  | (Expression ~ And ~ Expression)
+  | (Expression ~ Or ~ Expression)
+  | (Expression ~ Caret ~ Expression)
+  | (Expression ~ Shl ~ Expression)
+  | (Expression ~ Shr ~ Expression)
+}
+
+// Comparison Operators
+ComparisonExpression = {
+    (Expression ~ EqEq ~ Expression)
+  | (Expression ~ Ne ~ Expression)
+  | (Expression ~ Gt ~ Expression)
+  | (Expression ~ Lt ~ Expression)
+  | (Expression ~ Ge ~ Expression)
+  | (Expression ~ Le ~ Expression)
+}
+
+// Lazy boolean operators
+LazyBooleanExpression = {
+    (Expression ~ OrOr ~ Expression)
+  | (Expression ~ AndAnd ~ Expression)
+}
+
+// Type cast expressions
+TypeCastExpression = {
+    Expression ~ KW_AS ~ TypeNoBounds
+}
+
+// Assignment expressions
+AssignmentExpression = { Expression ~ Eq ~ Expression }
+
+// Compound assignment expressions
+CompoundAssignmentExpression = {
+    (Expression ~ PlusEq ~ Expression)
+  | (Expression ~ MinusEq ~ Expression)
+  | (Expression ~ StarEq ~ Expression)
+  | (Expression ~ SlashEq ~ Expression)
+  | (Expression ~ PercentEq ~ Expression)
+  | (Expression ~ AndEq ~ Expression)
+  | (Expression ~ OrEq ~ Expression)
+  | (Expression ~ CaretEq ~ Expression)
+  | (Expression ~ ShlEq ~ Expression)
+  | (Expression ~ ShrEq ~ Expression)
+}
+
+// Grouped expressions
+GroupedExpression = { OpeningParen ~ Expression ~ ClosingParen }
+
+// Array expressions
+ArrayExpression = { OpeningBrack ~ ArrayElements* ~ ClosingBrack }
+
+ArrayElements = {
+    (Expression ~ (Comma ~ Expression)* ~ Comma?)
+  | (Expression ~ Semi ~ Expression)
+}
+
+// Array and slice indexing expressions
+IndexExpression = { Expression ~ OpeningBrack ~ Expression ~ ClosingBrack }
+
+// Tuple expressions
+TupleExpression = { OpeningParen ~ TupleElements? ~ ClosingParen }
+TupleElements   = { (Expression ~ Comma)+ ~ Expression? }
+
+// Tuple indexing expressions
+TupleIndexingExpression = { Expression ~ Dot ~ TUPLE_INDEX }
+
+TUPLE_INDEX = { integer }
+
+// Struct expressions
+StructExpression = {
+    StructExprStruct
+  | StructExprTuple
+  | StructExprUnit
+}
+
+StructExprStruct = { PathInExpression ~ OpeningBrace ~ (StructExprFields | StructBase)? ~ ClosingBrace }
+StructExprFields = { StructExprField ~ (Comma ~ StructExprField)* ~ ((Comma ~ StructBase) | Comma?) }
+StructExprField  = { OuterAttribute* ~ (IDENTIFIER | ((IDENTIFIER | TUPLE_INDEX) ~ Colon ~ Expression)) }
+StructBase       = { DotDot ~ Expression }
+StructExprTuple  = { PathInExpression ~ ((Expression ~ (Comma ~ Expression)* ~ Comma?)?) }
+StructExprUnit   = { PathInExpression }
+
+// Call expressions
+CallExpression = { Expression ~ OpeningParen ~ CallParams? ~ ClosingParen }
+CallParams     = { Expression ~ (Comma ~ Expression)* ~ Comma? }
+
+// Method-call expressions
+MethodCallExpression = { Expression ~ Dot ~ PathExprSegment ~ OpeningParen ~ CallParams? ~ ClosingParen }
+
+// Field access expressions
+FieldExpression = { Expression ~ Dot ~ IDENTIFIER }
+
+// Closure expressions
+ClosureExpression = {
+    KW_MOVE? ~ (OrOr | (Or ~ ClosureParameters? ~ Or)) ~ (Expression | (RArrow ~ TypeNoBounds ~ BlockExpression))
+}
+
+ClosureParameters = { ClosureParam ~ (Comma ~ ClosureParam)* ~ Comma? }
+
+ClosureParam = { OuterAttribute* ~ PatternNoTopAlt ~ (Colon ~ Type)? }
+
+// Loops and other breakable expressions
+LoopExpression = {
+    LoopLabel? ~ (InfiniteLoopExpression | PredicateLoopExpression | PredicatePatternLoopExpression | IteratorLoopExpression | LabelBlockExpression)
+}
+
+// Infinite loops
+InfiniteLoopExpression = { KW_LOOP ~ BlockExpression }
+
+// Predicate loops (except struct expression)
+PredicateLoopExpression = { KW_WHILE ~ Expression ~ BlockExpression }
+
+// Predicate pattern loops
+PredicatePatternLoopExpression = { KW_WHILE ~ KW_LET ~ Scrutinee ~ BlockExpression }
+
+// Iterator loops (except struct expression)
+IteratorLoopExpression = { KW_FOR ~ Pattern ~ KW_IN ~ Expression ~ BlockExpression }
+
+// Loop labels
+LoopLabel = { LIFETIME_OR_LABEL ~ Colon }
+
+LIFETIME_OR_LABEL = { single_quote ~ NON_KEYWORD_IDENTIFIER }
+
+// break expressions
+BreakExpression = { KW_BREAK ~ LIFETIME_OR_LABEL? ~ Expression? }
+
+// Labelled block expressions
+LabelBlockExpression = { BlockExpression }
+
+// continue expressions
+ContinueExpression = { KW_CONTINUE ~ LIFETIME_OR_LABEL? }
+
+// Range expressions
+RangeExpression = {
+    RangeExpr
+  | RangeFromExpr
+  | RangeToExpr
+  | RangeFullExpr
+  | RangeInclusiveExpr
+  | RangeToInclusiveExpr
+}
+
+RangeExpr            = { Expression ~ DotDot ~ Expression }
+RangeFromExpr        = { Expression ~ DotDot }
+RangeToExpr          = { DotDot ~ Expression }
+RangeFullExpr        = { DotDot }
+RangeInclusiveExpr   = { Expression ~ DotDotEq ~ Expression }
+RangeToInclusiveExpr = { DotDotEq ~ Expression }
+
+// if expressions (except struct expression)
+IfExpression = {
+    KW_IF ~ Expression ~ BlockExpression ~ (KW_ELSE ~ (BlockExpression | IfExpression | IfLetExpression))?
+}
+
+// if let expressions (except lazy boolean operator expression )
+IfLetExpression = {
+    KW_IF ~ KW_LET ~ Pattern ~ Eq ~ Scrutinee ~ BlockExpression ~ (KW_ELSE ~ (BlockExpression | IfExpression | IfLetExpression))?
+}
+
+// match expressions
+MatchExpression = { KW_MATCH ~ Scrutinee ~ OpeningBrace ~ InnerAttribute* ~ MatchArms? ~ ClosingBrace }
+
+// except struct expression
+Scrutinee = { Expression }
+
+MatchArms = {
+    (MatchArm ~ FatArrow ~ ((ExpressionWithoutBlock ~ Comma) | (ExpressionWithBlock ~ Comma?)))* ~ MatchArm ~ FatArrow ~ Expression ~ Comma?
+}
+
+MatchArm = { OuterAttribute* ~ Pattern ~ MatchArmGuard? }
+
+MatchArmGuard = { KW_IF ~ Expression }
+
+// return expressions
+ReturnExpression = { KW_RETURN ~ Expression? }
+
+// Await expressions
+AwaitExpression = { Expression ~ Dot ~ KW_AWAIT }
+
+// _ expressions
+UnderscoreExpression = { Underscore }
+
+// Patterns
+Pattern = { Or? ~ PatternNoTopAlt ~ (Or ~ PatternNoTopAlt)* }
+
+PatternNoTopAlt = { PatternWithoutRange | RangePattern }
+
+PatternWithoutRange = {
+    LiteralPattern
+  | IdentifierPattern
+  | WildcardPattern
+  | RestPattern
+  | ReferencePattern
+  | StructPattern
+  | TupleStructPattern
+  | TuplePattern
+  | GroupedPattern
+  | SlicePattern
+  | PathPattern // |  MacroInvocation
+}
+
+LiteralPattern = { BoolLiteral | CharLiteral | (Minus? ~ IntegerLiteral) | (Minus? ~ FloatLiteral) | StringLiteral }
+
+BoolLiteral = { KW_TRUE | KW_FALSE }
+
+CharLiteral = { character }
+
+IntegerLiteral = { integer }
+
+FloatLiteral = { float }
+
+StringLiteral = { string }
+
+IdentifierPattern = { KW_REF? ~ KW_MUT? ~ IDENTIFIER ~ (At ~ PatternNoTopAlt)? }
+
+WildcardPattern = { Underscore }
+
+RestPattern = { DotDot }
+
+ReferencePattern = { (And | AndAnd) ~ KW_MUT? ~ PatternWithoutRange }
+
+// Struct patterns
+StructPattern = { PathInExpression ~ OpeningBrace ~ StructPatternElements? ~ ClosingBrace }
+
+StructPatternElements = { (StructPatternFields ~ (Comma | (Comma ~ StructPatternEtCetera))?) | StructPatternEtCetera }
+
+StructPatternFields = { StructPatternField ~ (Comma ~ StructPatternField)* }
+StructPatternField  = {
+    OuterAttribute* ~ ((TUPLE_INDEX ~ Colon ~ Pattern) | (IDENTIFIER ~ Colon ~ Pattern) | (KW_REF? ~ KW_MUT? ~ IDENTIFIER))
+}
+
+StructPatternEtCetera = { OuterAttribute* ~ DotDot }
+
+// Tuple struct patterns
+TupleStructPattern = { PathInExpression ~ OpeningParen ~ TupleStructItems? ~ ClosingParen }
+TupleStructItems   = { Pattern ~ (Comma ~ Pattern)* ~ Comma? }
+
+// Tuple patterns
+TuplePattern = { OpeningParen ~ TuplePatternItems ~ ClosingParen }
+
+TuplePatternItems = {
+    Pattern
+  | RestPattern
+  | (Pattern ~ (Comma ~ Pattern)+ ~ Comma?)
+}
+
+// Grouped patterns
+GroupedPattern = { OpeningParen ~ Pattern ~ ClosingParen }
+
+// Slice patterns
+SlicePattern = { OpeningBrack ~ SlicePatternItems ~ ClosingBrack }
+
+SlicePatternItems = { Pattern ~ (Comma ~ Pattern)* ~ Comma? }
+
+// Path patterns
+PathPattern = { PathExpression }
+
+// Range patterns
+RangePattern = {
+    RangeInclusivePattern
+  | RangeFromPattern
+  | RangeToInclusivePattern
+}
+
+// 
+RangeInclusivePattern   = { RangePatternBound ~ DotDotEq ~ RangePatternBound }
+RangeFromPattern        = { RangePatternBound ~ DotDot }
+RangeToInclusivePattern = { DotDotEq ~ RangePatternBound }
+
+RangePatternBound = {
+    CHAR_LITERAL
+  | BYTE_LITERAL
+  | (Minus? ~ INTEGER_LITERAL)
+  | (Minus? ~ FLOAT_LITERAL)
+  | PathExpression
+}
+
+// Type expressions
+Type = { TypeNoBounds | ImplTraitType | TraitObjectType }
+
+TypeNoBounds = {
+    PrimitiveType
+  | ParenthesizedType
+  | ImplTraitTypeOneBound
+  | TraitObjectTypeOneBound
+  | TypePath
+  | TupleType
+  | NeverType
+  | RawPointerType
+  | ReferenceType
+  | ArrayType
+  | SliceType
+  | InferredType
+  | QualifiedPathInType
+  | BareFunctionType // | MacroInvocation
+}
+
+PrimitiveType = { KW_BOOL | KW_BYTE | KW_CHAR | KW_INT | KW_FLOAT | KW_STRING }
+
+// Parenthesized types
+ParenthesizedType = { OpeningParen ~ Type ~ ClosingParen }
+
+// Never type
+NeverType = { Not }
+
+// Tuple types
+TupleType = { (OpeningParen ~ ClosingParen) | (OpeningParen ~ (Type ~ Comma)+ ~ Type? ~ ClosingParen) }
+
+// Array types
+ArrayType = { OpeningBrack ~ Type ~ Semi ~ Expression ~ ClosingBrack }
+
+// Slice types
+SliceType = { OpeningBrack ~ Type ~ ClosingBrack }
+
+// References (& and &mut)
+ReferenceType = { And ~ Lifetime? ~ KW_MUT? ~ TypeNoBounds }
+
+// Raw pointers (*const and *mut)
+RawPointerType = { Star ~ (KW_MUT | KW_CONST) ~ TypeNoBounds }
+
+// Function pointer types
+BareFunctionType = {
+    ForLifetimes? ~ FunctionTypeQualifiers ~ KW_FN ~ OpeningBrace ~ FunctionParametersMaybeNamedVariadic? ~ ClosingBrace ~ BareFunctionReturnType?
+}
+
+FunctionTypeQualifiers = { KW_UNSAFE? ~ (KW_EXTERN ~ Abi?)? }
+
+BareFunctionReturnType = { RArrow ~ TypeNoBounds }
+
+FunctionParametersMaybeNamedVariadic = { MaybeNamedFunctionParameters | MaybeNamedFunctionParametersVariadic }
+MaybeNamedFunctionParameters         = { MaybeNamedParam ~ (Comma ~ MaybeNamedParam)* ~ Comma? }
+
+MaybeNamedParam = { OuterAttribute* ~ ((IDENTIFIER | Underscore) ~ Colon)? ~ Type }
+
+MaybeNamedFunctionParametersVariadic = { (MaybeNamedParam ~ Comma)* ~ MaybeNamedParam ~ Comma ~ OuterAttribute* ~ DotDotDot }
+
+// Trait objects
+TraitObjectType         = { KW_DYN? ~ TypeParamBounds }
+TraitObjectTypeOneBound = { KW_DYN? ~ TraitBound }
+
+// Impl trait
+ImplTraitType         = { KW_IMPL ~ TypeParamBounds }
+ImplTraitTypeOneBound = { KW_IMPL ~ TraitBound }
+
+// Inferred type
+InferredType = { Underscore }
+
+// Trait and lifetime bounds
+TypeParamBounds = { TypeParamBound ~ (Plus ~ TypeParamBound)* ~ Plus? }
+
+TypeParamBound = { Lifetime | TraitBound }
+
+TraitBound = { (Question? ~ ForLifetimes? ~ TypePath) | (OpeningParen ~ Question? ~ ForLifetimes? ~ TypePath ~ ClosingParen) }
+
+LifetimeBounds = { (Lifetime ~ Plus)* ~ Lifetime? }
+Lifetime       = { LIFETIME_OR_LABEL | (single_quote ~ KW_STATIC) | (single_quote ~ Underscore) }
+
+// Higher-ranked trait bounds
+ForLifetimes = { KW_FOR ~ GenericParams }
+
+// Simple Paths
+SimplePath = { PathSep? ~ SimplePathSegment ~ (PathSep ~ SimplePathSegment)* }
+
+SimplePathSegment = { IDENTIFIER | KW_SUPER | KW_SELFVALUE | KW_CRATE }
+
+// Paths in expressions
+PathInExpression = { PathSep? ~ PathExprSegment ~ (PathSep ~ PathExprSegment)* }
+
+PathExprSegment = { PathIdentSegment ~ (PathSep ~ GenericArgs)? }
+
+PathIdentSegment = {
+    IDENTIFIER
+  | KW_SUPER
+  | KW_SELFVALUE
+  | KW_SELFTYPE
+  | KW_CRATE
+}
+
+GenericArgs = { (Lt ~ Gt) | (Lt ~ (GenericArg ~ Comma)* ~ GenericArg ~ Comma? ~ Gt) }
+
+GenericArg = { Lifetime | Type | GenericArgsConst | GenericArgsBinding }
+
+GenericArgsConst = { BlockExpression | LiteralExpression | (Minus ~ LiteralExpression) | SimplePathSegment }
+
+GenericArgsBinding = { IDENTIFIER ~ Eq ~ Type }
+
+// Qualified paths
+QualifiedPathInExpression = { QualifiedPathType ~ (PathSep ~ PathExprSegment)+ }
+
+QualifiedPathType = { Lt ~ Type ~ (KW_AS ~ TypePath)? ~ Gt }
+
+QualifiedPathInType = { QualifiedPathType ~ (PathSep ~ PathExprSegment)+ }
+
+// Paths in types
+TypePath = { PathSep? ~ TypePathSegment ~ (PathSep ~ TypePathSegment)* }
+
+TypePathSegment = { PathIdentSegment ~ PathSep? ~ (GenericArg | TypePathFn)? }
+
+TypePathFn = { OpeningParen ~ TypePathFnInputs? ~ ClosingParen ~ (RArrow ~ Type)? }
+
+TypePathFnInputs = { Type ~ (Comma ~ Type)* ~ Comma? }
+
+// Identifiers
+IDENTIFIER = { ident }
+
+NON_KEYWORD_IDENTIFIER = { ident }
+
+/// An boolean
+boolean = { KW_TRUE | KW_FALSE }
+
+/// An identifier.
+ident = @{ !"PUSH" ~ ("_" | alpha) ~ ("_" | alpha_num)* }
+
+/// An alpha character.
+alpha = _{ 'a'..'z' | 'A'..'Z' }
+
+/// An alphanumeric character.
+alpha_num = _{ alpha | '0'..'9' }
+
+/// An digit num
+digit = _{ '0'..'9' }
+
+/// A string.
+string = ${ quote ~ inner_str ~ quote }
+
+/// An insensitive string.
+insensitive_string = { "^" ~ string }
+
+/// A character range.
+range = { character ~ range_operator ~ character }
+
+/// A single quoted character
+character = ${ single_quote ~ inner_chr ~ single_quote }
+
+/// A quoted string.
+inner_str = @{ (!("\"" | "\\") ~ ANY)* ~ (escape ~ inner_str)? }
+
+/// An escaped or any character.
+inner_chr = @{ escape | ANY }
+
+/// An escape sequence.
+escape = @{ "\\" ~ ("\"" | "\\" | "r" | "n" | "t" | "0" | "'" | code | unicode) }
+
+/// A hexadecimal code.
+code = @{ "x" ~ hex_digit{2} }
+
+/// A unicode code.
+unicode = @{ "u" ~ OpeningBrace ~ hex_digit{2, 6} ~ ClosingBrace }
+
+/// A hexadecimal digit.
+hex_digit = @{ '0'..'9' | 'a'..'f' | 'A'..'F' }
+
+/// A double quote.
+quote = { "\"" }
+
+/// A single quote.
+single_quote = { "'" }
+
+integer = @{ "0" | ASCII_NONZERO_DIGIT ~ ASCII_DIGIT* }
+
+float = @{ integer ~ dot_operator ~ integer }
+exp   = @{ ("E" | "e") ~ ("+" | "-")? ~ ASCII_DIGIT+ }
+
+// =====================
+
+/// A range operator.
+range_operator = { ".." }
+
+/// Dot operator.
+dot_operator = { "." }
+
+// Symbols
+Plus       = { "+" }
+Minus      = { "-" }
+Star       = { "*" }
+Slash      = { "/" }
+Percent    = { "%" }
+Caret      = { "^" }
+Not        = { "!" }
+And        = { "&" }
+Or         = { "|" }
+AndAnd     = { "&&" }
+OrOr       = { "||" }
+Shl        = { "<<" }
+Shr        = { ">>" }
+PlusEq     = { "+=" }
+MinusEq    = { "-=" }
+StarEq     = { "*=" }
+SlashEq    = { "/=" }
+PercentEq  = { "%=" }
+CaretEq    = { "^=" }
+AndEq      = { "&=" }
+OrEq       = { "|=" }
+ShlEq      = { "<<=" }
+ShrEq      = { ">>=" }
+Eq         = { "=" }
+EqEq       = { "==" }
+Ne         = { "!=" }
+Gt         = { ">" }
+Lt         = { "<" }
+Ge         = { ">=" }
+Le         = { "<=" }
+At         = { "@" }
+Underscore = { "_" }
+Dot        = { "." }
+DotDot     = { ".." }
+DotDotDot  = { "..." }
+DotDotEq   = { "..=" }
+Comma      = { "," }
+Semi       = { ";" }
+Colon      = { ":" }
+PathSep    = { "::" }
+RArrow     = { "->" }
+FatArrow   = { "=>" }
+Pound      = { "#" }
+Dollar     = { "$" }
+Question   = { "?" }
+Tilde      = { "~" }
+
+// keywords
+KW_BOOL   = { "bool" }
+KW_BYTE   = { "byte" }
+KW_CHAR   = { "char" }
+KW_INT    = { "int" }
+KW_FLOAT  = { "float" }
+KW_STRING = { "string" }
+
+KW_AS        = { "as" }
+KW_ASYNC     = { "async" }
+KW_AWAIT     = { "await" }
+KW_BREAK     = { "break" }
+KW_CONST     = { "const" }
+KW_CONTINUE  = { "continue" }
+KW_CRATE     = { "crate" }
+KW_DYN       = { "dyn" }
+KW_ELSE      = { "else" }
+KW_ENUM      = { "enum" }
+KW_EXTERN    = { "extern" }
+KW_FALSE     = { "false" }
+KW_FN        = { "fn" }
+KW_FOR       = { "for" }
+KW_IF        = { "if" }
+KW_IMPL      = { "impl" }
+KW_IN        = { "in" }
+KW_LET       = { "let" }
+KW_LOOP      = { "loop" }
+KW_MATCH     = { "match" }
+KW_MOD       = { "mod" }
+KW_MOVE      = { "move" }
+KW_MUT       = { "mut" }
+KW_PUB       = { "pub" }
+KW_REF       = { "ref" }
+KW_RETURN    = { "return" }
+KW_SELFVALUE = { "self" }
+KW_SELFTYPE  = { "Self" }
+KW_STATIC    = { "static" }
+KW_STRUCT    = { "struct" }
+KW_SUPER     = { "super" }
+KW_TRAIT     = { "trait" }
+KW_TRUE      = { "true" }
+KW_TYPE      = { "type" }
+KW_UNION     = { "union" }
+KW_UNSAFE    = { "unsafe" }
+KW_USE       = { "use" }
+KW_WHERE     = { "where" }
+KW_WHILE     = { "while" }
+
+// Delimiters
+/// Opening brace for a rule.
+OpeningBrace = { "{" }
+
+/// Closing brace for a rule.
+ClosingBrace = { "}" }
+
+/// Opening parenthesis for a branch, PUSH, etc.
+OpeningParen = { "(" }
+
+/// Closing parenthesis for a branch, PUSH, etc.
+ClosingParen = { ")" }
+
+/// Opening bracket for PEEK (slice inside).
+OpeningBrack = { "[" }
+
+/// Closing bracket for PEEK (slice inside).
+ClosingBrack = { "]" }
+
+/// A newline character.
+newline = _{ "\n" | "\r\n" }
+
+/// A whitespace character.
+WHITESPACE = _{ " " | "\t" | newline }
+
+/// A single line comment.
+line_comment = _{ ("//" ~ !("/" | "!") ~ (!newline ~ ANY)*) }
+
+/// A multi-line comment.
+block_comment = _{ "/*" ~ (block_comment | !"*/" ~ ANY)* ~ "*/" }
+
+/// A grammar comment.
+COMMENT = _{ block_comment | line_comment }
+
+// ref: https://doc.rust-lang.org/reference/comments.html
+/// A space character.
+space = _{ " " | "\t" }
+
+/// A top-level comment.
+grammar_doc = ${ "//!" ~ space? ~ inner_doc }
+
+/// A rule comment.
+line_doc = ${ "///" ~ space? ~ inner_doc }
+
+/// A comment content.
+inner_doc = @{ (!newline ~ ANY)* }
