@@ -3,9 +3,9 @@ mod bytecode;
 mod error;
 mod instructions;
 mod parser;
-mod tokenizer;
 mod value;
 mod vm;
+mod diagnostic;
 
 #[cfg(test)]
 mod tests {

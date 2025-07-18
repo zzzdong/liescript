@@ -91,4 +91,5 @@ define_keywords! {
     While => "while",
     Await => "await",
     Async => "async",
+    Gen => "gen",
 }

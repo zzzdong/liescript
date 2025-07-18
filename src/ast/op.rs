@@ -76,7 +76,7 @@ define_op!(NumOp,
     "-" => (Sub, Minus),
     "*" => (Mul, Star),
     "/" => (Div, Slash),
-    "%" => (Mod, Percent),
+    "%" => (Rem, Percent),
 );
 
 define_op!(BitOp,
@@ -136,76 +136,101 @@ pub enum OpKind {
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum BinOp {
-    Num(NumOp),
-    Bit(BitOp),
-    Comp(CompOp),
-    Log(LogOp),
-    Assign(AssignOp),
-    Range(RangeOp),
-    Access(AccessOp),
-    CastOp,
-    DeclOp,
-    PathOp,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Rem,
+    BitAnd,
+    BitOr,
+    BitXor,
+    Shl,
+    Shr,
+    Equal,
+    NotEqual,
+    LessThen,
+    LessThenOrEqual,
+    GreaterThen,
+    GreaterThenOrEqual,
+    LogicAnd,
+    LogicOr,
+    Assign,
+    AddAssign,
+    SubAssign,
+    MulAssign,
+    DivAssign,
+    RemAssign,
+    Range,
+    RangeInclusive,
+    MemberAccess,
+    Path,
+    Cast,
 }
 
 impl BinOp {
     pub fn from_symbol(p: Symbol) -> Result<Self, &'static str> {
         match p {
             // num op
-            Symbol::Plus => Ok(BinOp::Num(NumOp::Add)),
-            Symbol::Minus => Ok(BinOp::Num(NumOp::Sub)),
-            Symbol::Star => Ok(BinOp::Num(NumOp::Mul)),
-            Symbol::Slash => Ok(BinOp::Num(NumOp::Div)),
-            Symbol::Percent => Ok(BinOp::Num(NumOp::Mod)),
+            Symbol::Plus => Ok(BinOp::Add),
+            Symbol::Minus => Ok(BinOp::Sub),
+            Symbol::Star => Ok(BinOp::Mul),
+            Symbol::Slash => Ok(BinOp::Div),
+            Symbol::Percent => Ok(BinOp::Rem),
             // bit op
-            Symbol::And => Ok(BinOp::Bit(BitOp::And)),
-            Symbol::Or => Ok(BinOp::Bit(BitOp::Or)),
-            Symbol::Caret => Ok(BinOp::Bit(BitOp::Xor)),
-            Symbol::LShift => Ok(BinOp::Bit(BitOp::Shl)),
-            Symbol::RShift => Ok(BinOp::Bit(BitOp::Shr)),
+            Symbol::And => Ok(BinOp::BitAnd),
+            Symbol::Or => Ok(BinOp::BitOr),
+            Symbol::Caret => Ok(BinOp::BitXor),
+            Symbol::LShift => Ok(BinOp::Shl),
+            Symbol::RShift => Ok(BinOp::Shr),
             // comp op
-            Symbol::EqEq => Ok(BinOp::Comp(CompOp::Equal)),
-            Symbol::NotEq => Ok(BinOp::Comp(CompOp::NotEqual)),
-            Symbol::Lt => Ok(BinOp::Comp(CompOp::LessThan)),
-            Symbol::LtE => Ok(BinOp::Comp(CompOp::LessThanOrEqual)),
-            Symbol::Gt => Ok(BinOp::Comp(CompOp::GreatThan)),
-            Symbol::GtE => Ok(BinOp::Comp(CompOp::GreatThanOrEqual)),
+            Symbol::EqEq => Ok(BinOp::Equal),
+            Symbol::NotEq => Ok(BinOp::NotEqual),
+            Symbol::Lt => Ok(BinOp::LessThen),
+            Symbol::LtE => Ok(BinOp::LessThenOrEqual),
+            Symbol::Gt => Ok(BinOp::GreaterThen),
+            Symbol::GtE => Ok(BinOp::GreaterThenOrEqual),
             // logic op
-            Symbol::AndAnd => Ok(BinOp::Log(LogOp::And)),
-            Symbol::OrOr => Ok(BinOp::Log(LogOp::Or)),
+            Symbol::AndAnd => Ok(BinOp::LogicAnd),
+            Symbol::OrOr => Ok(BinOp::LogicOr),
             // assign op
-            Symbol::Eq => Ok(BinOp::Assign(AssignOp::Assign)),
-            Symbol::PlusEq => Ok(BinOp::Assign(AssignOp::Add)),
-            Symbol::MinusEq => Ok(BinOp::Assign(AssignOp::Sub)),
-            Symbol::StarEq => Ok(BinOp::Assign(AssignOp::Mul)),
-            Symbol::SlashEq => Ok(BinOp::Assign(AssignOp::Div)),
-            Symbol::PercentEq => Ok(BinOp::Assign(AssignOp::Mod)),
+            Symbol::Eq => Ok(BinOp::Assign),
+            Symbol::PlusEq => Ok(BinOp::AddAssign),
+            Symbol::MinusEq => Ok(BinOp::SubAssign),
+            Symbol::StarEq => Ok(BinOp::MulAssign),
+            Symbol::SlashEq => Ok(BinOp::DivAssign),
+            Symbol::PercentEq => Ok(BinOp::RemAssign),
             // range op
-            Symbol::DotDot => Ok(BinOp::Range(RangeOp::Range)),
-            Symbol::DotDotEq => Ok(BinOp::Range(RangeOp::RangeTo)),
+            Symbol::DotDot => Ok(BinOp::Range),
+            Symbol::DotDotEq => Ok(BinOp::RangeInclusive),
             // field access
-            Symbol::Dot => Ok(BinOp::Access(AccessOp::Field)),
-            Symbol::PathSep => Ok(BinOp::Access(AccessOp::Path)),
-            // type decl
-            Symbol::Colon => Ok(BinOp::DeclOp),
-            // path op
-            Symbol::PathSep => Ok(BinOp::PathOp),
+            Symbol::Dot => Ok(BinOp::MemberAccess),
+            Symbol::PathSep => Ok(BinOp::Path),
+            // cast op
             _ => Err("unknown bin op"),
         }
     }
 
     pub fn kind(&self) -> OpKind {
         match self {
-            BinOp::Num(_op) => OpKind::Num,
-            BinOp::Bit(_op) => OpKind::Bit,
-            BinOp::Comp(_op) => OpKind::Comp,
-            BinOp::Log(_op) => OpKind::Log,
-            BinOp::Assign(_op) => OpKind::Assign,
-            BinOp::Range(_op) => OpKind::Range,
-            BinOp::Access(_op) => OpKind::Access,
-            BinOp::CastOp => OpKind::Cast,
-            BinOp::DeclOp => OpKind::Decl,
-            BinOp::PathOp => OpKind::Path,
+            BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem => OpKind::Num,
+            BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr => OpKind::Bit,
+            BinOp::Equal
+            | BinOp::NotEqual
+            | BinOp::LessThen
+            | BinOp::LessThenOrEqual
+            | BinOp::GreaterThen
+            | BinOp::GreaterThenOrEqual => OpKind::Comp,
+            BinOp::LogicAnd | BinOp::LogicOr => OpKind::Log,
+            BinOp::Assign
+            | BinOp::AddAssign
+            | BinOp::SubAssign
+            | BinOp::MulAssign
+            | BinOp::DivAssign
+            | BinOp::RemAssign => OpKind::Assign,
+            BinOp::Range | BinOp::RangeInclusive => OpKind::Range,
+            BinOp::MemberAccess => OpKind::Access,
+            BinOp::Path => OpKind::Path,
+            BinOp::Cast => OpKind::Cast,
         }
     }
 }
@@ -213,16 +238,35 @@ impl BinOp {
 impl fmt::Display for BinOp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            BinOp::Num(op) => write!(f, "{}", op.as_str()),
-            BinOp::Bit(op) => write!(f, "{}", op.as_str()),
-            BinOp::Comp(op) => write!(f, "{}", op.as_str()),
-            BinOp::Log(op) => write!(f, "{}", op.as_str()),
-            BinOp::Assign(op) => write!(f, "{}", op.as_str()),
-            BinOp::Range(op) => write!(f, "{}", op.as_str()),
-            BinOp::Access(op) => write!(f, "{}", op.as_str()),
-            BinOp::CastOp => write!(f, "as"),
-            BinOp::DeclOp => write!(f, ":"),
-            BinOp::PathOp => write!(f, "::"),
+            BinOp::Add => write!(f, "+"),
+            BinOp::Sub => write!(f, "-"),
+            BinOp::Mul => write!(f, "*"),
+            BinOp::Div => write!(f, "/"),
+            BinOp::Rem => write!(f, "%"),
+            BinOp::BitAnd => write!(f, "&"),
+            BinOp::BitOr => write!(f, "|"),
+            BinOp::BitXor => write!(f, "^"),
+            BinOp::Shl => write!(f, "<<"),
+            BinOp::Shr => write!(f, ">>"),
+            BinOp::Equal => write!(f, "=="),
+            BinOp::NotEqual => write!(f, "!="),
+            BinOp::LessThen => write!(f, "<"),
+            BinOp::LessThenOrEqual => write!(f, "<="),
+            BinOp::GreaterThen => write!(f, ">"),
+            BinOp::GreaterThenOrEqual => write!(f, ">="),
+            BinOp::LogicAnd => write!(f, "&&"),
+            BinOp::LogicOr => write!(f, "||"),
+            BinOp::Assign => write!(f, "="),
+            BinOp::AddAssign => write!(f, "+="),
+            BinOp::SubAssign => write!(f, "-="),
+            BinOp::MulAssign => write!(f, "*="),
+            BinOp::DivAssign => write!(f, "/="),
+            BinOp::RemAssign => write!(f, "%="),
+            BinOp::Range => write!(f, ".."),
+            BinOp::RangeInclusive => write!(f, "..="),
+            BinOp::MemberAccess => write!(f, "."),
+            BinOp::Path => write!(f, "::"),
+            BinOp::Cast => write!(f, "as"),
         }
     }
 }

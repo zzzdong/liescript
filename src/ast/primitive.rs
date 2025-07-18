@@ -62,5 +62,4 @@ define_primitive! {
     Char => "char",
     Int => "int",
     Float => "float",
-    Str => "str",
 }
