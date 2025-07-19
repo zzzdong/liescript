@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{fmt, ops::Deref};
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub struct Spanned<T> {
@@ -21,6 +21,20 @@ impl<T: fmt::Debug> fmt::Display for Spanned<T> {
 impl<T: PartialEq> PartialEq<T> for Spanned<T> {
     fn eq(&self, other: &T) -> bool {
         &self.inner == other
+    }
+}
+
+impl<T> AsRef<T> for Spanned<T> {
+    fn as_ref(&self) -> &T {
+        &self.inner
+    }
+}
+
+impl<T> Deref for Spanned<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
     }
 }
 

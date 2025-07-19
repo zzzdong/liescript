@@ -1,7 +1,7 @@
 use std::{fmt, slice};
 
 use crate::ast::*;
-use crate::diagnostic::{Spanned};
+use crate::diagnostic::Spanned;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Token {
@@ -28,7 +28,7 @@ impl fmt::Display for Token {
                 write!(f, "{}", ident.as_str())
             }
             Token::Literal(lit) => {
-                write!(f, "{}", lit)
+                write!(f, "{lit}")
             }
             Token::Keyword(kw) => {
                 write!(f, "{}", kw.as_str())
@@ -78,7 +78,7 @@ pub struct TokenStream {
     iter: <Vec<Spanned<Token>> as IntoIterator>::IntoIter,
 }
 
-impl<'i> TokenStream {
+impl TokenStream {
     pub fn new(iter: Vec<Spanned<Token>>) -> Self {
         TokenStream {
             iter: iter.into_iter(),
@@ -90,7 +90,7 @@ impl<'i> TokenStream {
     }
 }
 
-impl<'i> Iterator for TokenStream {
+impl Iterator for TokenStream {
     type Item = Spanned<Token>;
 
     fn next(&mut self) -> Option<Self::Item> {

@@ -20,6 +20,8 @@ pub enum TopLevel {
     Return(ReturnStmt),
     /// An item definition.
     Item(Item),
+    /// A block.
+    Block(Block),
     /// Expr without trailing semicolon.
     Expr(Expression),
     /// Expression with trailing semicolon.
@@ -147,16 +149,13 @@ pub struct StructField {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[derive(Default)]
 pub enum Visibility {
+    #[default]
     Pub,
     Priv,
 }
 
-impl Default for Visibility {
-    fn default() -> Self {
-        Visibility::Pub
-    }
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {

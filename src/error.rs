@@ -1,10 +1,5 @@
 use std::borrow::Cow;
 
-
-
-
-
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorKind {
     InvalidSyntax,

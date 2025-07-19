@@ -107,7 +107,7 @@ impl<'i> Tokenizer<'i> {
     }
 
     fn next_char(&mut self) -> Option<char> {
-        self.chars.next().map(|c| {
+        self.chars.next().inspect(|&c| {
             self.pos.offset += c.len_utf8();
             if c == '\n' {
                 self.pos.line += 1;
@@ -115,7 +115,6 @@ impl<'i> Tokenizer<'i> {
             } else {
                 self.pos.column += 1;
             }
-            c
         })
     }
 
@@ -208,7 +207,7 @@ impl<'i> Tokenizer<'i> {
 
             let number = number.replace("_", "");
 
-            return number.parse::<f64>().map(|f| Token::float(f)).map_err(|e| {
+            return number.parse::<f64>().map(Token::float).map_err(|e| {
                 TokenError::new("parse float failed")
                     .with_source(e)
                     .with_span(Span::new(start, self.pos()))
@@ -217,7 +216,7 @@ impl<'i> Tokenizer<'i> {
 
         let number = i.to_string().replace("_", "");
 
-        number.parse::<i64>().map(|i| Token::int(i)).map_err(|e| {
+        number.parse::<i64>().map(Token::int).map_err(|e| {
             TokenError::new("parse float failed")
                 .with_source(e)
                 .with_span(Span::new(start, self.pos()))
@@ -253,21 +252,21 @@ impl<'i> Tokenizer<'i> {
         let token = self.eat_char()?;
         match token {
             Token::Literal(Literal::Char(ch)) if ch as u32 <= 0xff => {
-                return Ok(Token::Literal(Literal::Byte(ch as u8)));
+                Ok(Token::Literal(Literal::Byte(ch as u8)))
             }
-            _ => return Err(TokenError::new("invalid byte char literal")),
+            _ => Err(TokenError::new("invalid byte char literal")),
         }
     }
 
     fn eat_byte_slice(&mut self) -> Result<Token, TokenError> {
         self.advance(1);
         let token = self.eat_string()?;
-        return match token {
+        match token {
             Token::Literal(Literal::String(s)) => {
-                return Ok(Token::Literal(Literal::ByteSlice(s.into_bytes())));
+                Ok(Token::Literal(Literal::ByteSlice(s.into_bytes())))
             }
             _ => Err(TokenError::new("invalid byte slice string literal")),
-        };
+        }
     }
 
     fn eat_string(&mut self) -> Result<Token, TokenError> {
@@ -376,12 +375,11 @@ impl<'i> Tokenizer<'i> {
 
     fn eat_symbol(&mut self, peek: char) -> Result<Token, TokenError> {
         // try 3 byte
-        if self.has_at_lease(3) {
-            if self.starts_with("..=") {
-                self.advance(3);
-                return Ok(Token::Symbol(Symbol::DotDotEq));
-            }
+        if self.starts_with("..=") {
+            self.advance(3);
+            return Ok(Token::Symbol(Symbol::DotDotEq));
         }
+
         // try 2 byte
         if self.has_at_lease(2) {
             let pat = &self.chars.clone().as_str()[..2];
@@ -474,7 +472,7 @@ mod test {
             vec![
                 Token::Keyword(Keyword::Let),
                 Token::Ident("x".into()),
-                Token::Symbol(Symbol::Eq),
+                Token::Symbol(Symbol::Equal),
                 Token::Literal(Literal::Integer(5)),
                 Token::Symbol(Symbol::Semicolon)
             ]
@@ -579,7 +577,7 @@ mod test {
                 Token::Comment(" This is a comment".to_string()),
                 Token::Keyword(Keyword::Let),
                 Token::Ident(Identifier::new("y")),
-                Token::Symbol(Symbol::Eq),
+                Token::Symbol(Symbol::Equal),
                 Token::Literal(Literal::Integer(10)),
                 Token::Symbol(Symbol::Semicolon),
             ]
@@ -605,10 +603,10 @@ mod test {
                 Token::Symbol(Symbol::Star),
                 Token::Symbol(Symbol::Slash),
                 Token::Symbol(Symbol::Percent),
-                Token::Symbol(Symbol::EqEq),
-                Token::Symbol(Symbol::NotEq),
-                Token::Symbol(Symbol::Gt),
-                Token::Symbol(Symbol::Lt),
+                Token::Symbol(Symbol::EqualEqual),
+                Token::Symbol(Symbol::NotEqual),
+                Token::Symbol(Symbol::GreatThen),
+                Token::Symbol(Symbol::LessThan),
                 Token::Symbol(Symbol::FatArrow),
             ]
         );
@@ -696,19 +694,19 @@ mod test {
         assert_eq!(
             tokens,
             vec![
-                Token::Symbol(Symbol::NotEq),
-                Token::Symbol(Symbol::PlusEq),
-                Token::Symbol(Symbol::MinusEq),
-                Token::Symbol(Symbol::StarEq),
-                Token::Symbol(Symbol::SlashEq),
-                Token::Symbol(Symbol::PercentEq),
-                Token::Symbol(Symbol::CaretEq),
-                Token::Symbol(Symbol::AndEq),
-                Token::Symbol(Symbol::OrEq),
+                Token::Symbol(Symbol::NotEqual),
+                Token::Symbol(Symbol::PlusEqual),
+                Token::Symbol(Symbol::MinusEqual),
+                Token::Symbol(Symbol::StarEqual),
+                Token::Symbol(Symbol::SlashEqual),
+                Token::Symbol(Symbol::PercentEqual),
+                Token::Symbol(Symbol::CaretEqual),
+                Token::Symbol(Symbol::AndEqual),
+                Token::Symbol(Symbol::OrEqual),
                 Token::Symbol(Symbol::LShift),
                 Token::Symbol(Symbol::RShift),
                 Token::Symbol(Symbol::RArrow),
-                Token::Symbol(Symbol::PathSep),
+                Token::Symbol(Symbol::ColonColon),
             ]
         );
     }
@@ -730,7 +728,7 @@ mod test {
                 Token::Keyword(Keyword::If),
                 Token::Symbol(Symbol::LParen),
                 Token::Ident(Identifier::new("x")),
-                Token::Symbol(Symbol::Gt),
+                Token::Symbol(Symbol::GreatThen),
                 Token::Literal(Literal::Integer(5)),
                 Token::Symbol(Symbol::RParen),
                 Token::Symbol(Symbol::LBrace),

@@ -3,10 +3,10 @@ use std::fmt;
 use crate::{
     ast::{
         Identifier, Literal,
-        op::{BinOp, NumOp, PostfixOp, PrefixOp},
+        op::{BinOp, PostfixOp, PrefixOp},
         stmt::Block,
     },
-    diagnostic::{Span, Spanned},
+    diagnostic::Spanned,
 };
 
 const LEVEL_INDENT: usize = 2;
@@ -42,9 +42,8 @@ impl Expression {
             Expression::Index(IndexExpression { name: lhs, rhs }) => {
                 writeln!(
                     f,
-                    "{:indent$}{}",
+                    "{:indent$}IndexOp",
                     "",
-                    "IndexOp",
                     indent = level * LEVEL_INDENT
                 )?;
 
@@ -173,13 +172,13 @@ impl Expression {
                 node
             }
             Expression::Literal(lit) => {
-                let node = graph.add_node(format!("{lit:?}"));
+                
 
-                node
+                graph.add_node(format!("{lit:?}"))
             }
             Expression::Identifier(ident) => {
-                let node = graph.add_node(format!("{ident:?}"));
-                node
+                
+                graph.add_node(format!("{ident:?}"))
             }
             _ => {
                 unimplemented!("{expr:?}")

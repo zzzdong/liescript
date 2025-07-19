@@ -14,16 +14,16 @@ pub enum Literal {
 impl fmt::Display for Literal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Literal::Byte(b) => write!(f, "{:#x}", b),
-            Literal::Char(c) => write!(f, "'{}'", c),
-            Literal::Bool(b) => write!(f, "{}", b),
-            Literal::Integer(i) => write!(f, "{}", i),
-            Literal::Float(i) => write!(f, "{}", i),
-            Literal::String(s) => write!(f, "{}", s),
+            Literal::Byte(b) => write!(f, "{b:#x}"),
+            Literal::Char(c) => write!(f, "'{c}'"),
+            Literal::Bool(b) => write!(f, "{b}"),
+            Literal::Integer(i) => write!(f, "{i}"),
+            Literal::Float(i) => write!(f, "{i}"),
+            Literal::String(s) => write!(f, "{s}"),
             Literal::ByteSlice(bs) => write!(
                 f,
                 "\\x{}",
-                bs.iter().map(|b| format!("{:02x}", b)).collect::<String>()
+                bs.iter().map(|b| format!("{b:02x}")).collect::<String>()
             ),
         }
     }

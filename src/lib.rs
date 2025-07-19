@@ -1,11 +1,11 @@
 mod ast;
 mod bytecode;
+mod diagnostic;
 mod error;
 mod instructions;
 mod parser;
 mod value;
 mod vm;
-mod diagnostic;
 
 #[cfg(test)]
 mod tests {
