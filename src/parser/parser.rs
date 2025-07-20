@@ -92,7 +92,6 @@ pub enum Precedence {
     Range,
     LogicOr,
     LogicAnd,
-    Equal,
     Compare,
     BitOr,
     BitXor,
@@ -100,7 +99,7 @@ pub enum Precedence {
     BitShift,
     Term,
     Factor,
-    As,
+    Cast,
     Prefix,
     Postfix,
     Call,
@@ -187,6 +186,10 @@ impl Parser {
                         expr: Some(Box::new(expr)),
                     }))
                 }
+            }
+
+            Token::Keyword(Keyword::While) if in_block => {
+                self.parse_while_stmt().map(TopLevel::While)
             }
 
             _ => {
@@ -344,18 +347,6 @@ impl Parser {
         let tok = self.peek_token()?;
 
         Ok(match tok.inner {
-            Token::Keyword(kw) => {
-                self.consume_token()?;
-                match kw {
-                    Keyword::Bool => Type::Primitive(PrimitiveTy::Bool),
-                    Keyword::Byte => Type::Primitive(PrimitiveTy::Byte),
-                    Keyword::Char => Type::Primitive(PrimitiveTy::Char),
-                    Keyword::Int => Type::Primitive(PrimitiveTy::Int),
-                    Keyword::Float => Type::Primitive(PrimitiveTy::Float),
-                    Keyword::Str => Type::Primitive(PrimitiveTy::Str),
-                    _ => return Err(ParseError::unexpect("type", &tok)),
-                }
-            }
             Token::Symbol(Symbol::And) => {
                 self.consume_token()?;
                 let ty = self.parse_type()?;
@@ -395,6 +386,16 @@ impl Parser {
         };
 
         Ok(LetStmt { var, ty, expr })
+    }
+
+    fn parse_while_stmt(&mut self) -> Result<WhileStmt, ParseError> {
+        self.expect_token(Token::Keyword(Keyword::While))?;
+
+        let cond = Box::new(self.parse_expr()?);
+
+        let body = self.parse_block()?;
+
+        Ok(WhileStmt { cond, body })
     }
 
     /// reference: https://github.com/sqlparser-rs/sqlparser-rs/blob/main/src/parser.rs
@@ -477,6 +478,11 @@ impl Parser {
                     }
                 }
             },
+            Token::Keyword(Keyword::As) => Ok(Expression::BinOp(BinOpExpression {
+                op: BinOp::Cast,
+                lhs: Box::new(expr),
+                rhs: Box::new(self.parse_subexpr(precedence)?),
+            })),
             _ => {
                 unreachable!()
             }
@@ -545,20 +551,28 @@ impl Parser {
 
         let p = match tok.map(|t| t.inner) {
             Some(Token::Symbol(sym)) => match sym {
-                Symbol::Plus | Symbol::Minus => Precedence::Term,
-                Symbol::Star | Symbol::Slash | Symbol::Percent => Precedence::Factor,
-                Symbol::LParen | Symbol::LBracket => Precedence::Call,
-                Symbol::Dot => Precedence::Call,
-                Symbol::Equal => Precedence::Equal,
+                Symbol::Equal => Precedence::Assign,
+                Symbol::DotDot | Symbol::DotDotEqual => Precedence::Range,
+                Symbol::OrOr => Precedence::LogicOr,
+                Symbol::AndAnd => Precedence::LogicAnd,
                 Symbol::GreatThen
                 | Symbol::GreatThenEqual
                 | Symbol::LessThan
                 | Symbol::LessThenEqual
                 | Symbol::EqualEqual => Precedence::Compare,
+                Symbol::Or => Precedence::BitOr,
+                Symbol::Caret => Precedence::BitXor,
+                Symbol::And => Precedence::BitAnd,
+                Symbol::LShift | Symbol::RShift => Precedence::BitShift,
+                Symbol::Plus | Symbol::Minus => Precedence::Term,
+                Symbol::Star | Symbol::Slash | Symbol::Percent => Precedence::Factor,
+                Symbol::LParen | Symbol::LBracket => Precedence::Call,
+                Symbol::Dot => Precedence::Call,
                 Symbol::Question => Precedence::Postfix,
                 Symbol::ColonColon => Precedence::Path,
                 _ => Precedence::Lowest,
             },
+            Some(Token::Keyword(Keyword::As)) => Precedence::Cast,
             _ => Precedence::Lowest,
         };
 
@@ -612,22 +626,6 @@ impl Parser {
             Token::Keyword(kw) => match kw {
                 Keyword::Pub => Some(Visibility::Pub),
                 Keyword::Priv => Some(Visibility::Priv),
-                _ => None,
-            },
-            _ => None,
-        })
-    }
-
-    /// Look for primitive and consume it if it exists
-    fn try_primitive(&mut self) -> Option<PrimitiveTy> {
-        self.try_next(|tok| match tok {
-            Token::Keyword(kw) => match kw {
-                Keyword::Bool => Some(PrimitiveTy::Bool),
-                Keyword::Byte => Some(PrimitiveTy::Byte),
-                Keyword::Char => Some(PrimitiveTy::Char),
-                Keyword::Int => Some(PrimitiveTy::Int),
-                Keyword::Float => Some(PrimitiveTy::Float),
-                Keyword::Str => Some(PrimitiveTy::Str),
                 _ => None,
             },
             _ => None,
@@ -709,7 +707,6 @@ impl Parser {
     }
 
     /// Consume and return the next token
-    #[must_use]
     fn consume_token(&mut self) -> Result<Spanned<Token>, ParseError> {
         self.input.next_token().ok_or(ParseError::eof())
     }
@@ -722,6 +719,17 @@ impl Parser {
         } else {
             Err(ParseError::unexpect(kind, &tok))
         }
+    }
+
+    /// Consume next tokens, and check it with patterns
+    fn expect_tokens(&mut self, tokens: &[Token]) -> Result<(), ParseError> {
+        for tok in tokens {
+            let got = self.consume_token()?;
+            if &got != tok {
+                return Err(ParseError::unexpect(tok, &got));
+            }
+        }
+        Ok(())
     }
 
     /// Peek next token without cunsume it
@@ -773,15 +781,312 @@ mod test {
     }
 
     #[test]
-    fn test_parse_let_stmt() {
-        let mut parser = Parser::new("let x = 10;");
-        let stmt = parser.parse_top_level().unwrap();
+    fn test_parse_prefix_op() {
+        let mut parser = Parser::new("-42");
+        let expr = parser.parse_expr().unwrap();
         assert_eq!(
-            stmt,
-            TopLevel::Let(LetStmt {
-                var: "x".into(),
-                ty: None,
-                expr: Some(Box::new(Expression::Literal(Literal::Integer(10))))
+            expr,
+            Expression::PrefixOp(PrefixOpExpression {
+                op: PrefixOp::Neg,
+                rhs: Box::new(Expression::Literal(Literal::Integer(42))),
+            })
+        );
+
+        let mut parser = Parser::new("!true");
+        let expr = parser.parse_expr().unwrap();
+        assert_eq!(
+            expr,
+            Expression::PrefixOp(PrefixOpExpression {
+                op: PrefixOp::Not,
+                rhs: Box::new(Expression::Literal(Literal::Bool(true))),
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_postfix_op() {
+        let mut parser = Parser::new("foo?");
+        let expr = parser.parse_expr().unwrap();
+        assert_eq!(
+            expr,
+            Expression::PostfixOp(PostfixOpExpression {
+                op: PostfixOp::Try,
+                lhs: Box::new(Expression::Identifier("foo".into())),
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_expr_precedence() {
+        // Lowest precedence (just literals)
+        let mut parser = Parser::new("42");
+        let expr = parser.parse_expr().unwrap();
+        assert_eq!(expr, Expression::Literal(Literal::Integer(42)));
+
+        // Assign precedence
+        let mut parser = Parser::new("x = 1 + 2");
+        let expr = parser.parse_expr().unwrap();
+        assert_eq!(
+            expr,
+            Expression::BinOp(BinOpExpression {
+                op: BinOp::Assign,
+                lhs: Box::new(Expression::Identifier("x".into())),
+                rhs: Box::new(Expression::BinOp(BinOpExpression {
+                    op: BinOp::Add,
+                    lhs: Box::new(Expression::Literal(Literal::Integer(1))),
+                    rhs: Box::new(Expression::Literal(Literal::Integer(2))),
+                })),
+            })
+        );
+
+        // Range precedence
+        let mut parser = Parser::new("1..2 + 3");
+        let expr = parser.parse_expr().unwrap();
+        assert_eq!(
+            expr,
+            Expression::BinOp(BinOpExpression {
+                op: BinOp::Range,
+                lhs: Box::new(Expression::Literal(Literal::Integer(1))),
+                rhs: Box::new(Expression::BinOp(BinOpExpression {
+                    op: BinOp::Add,
+                    lhs: Box::new(Expression::Literal(Literal::Integer(2))),
+                    rhs: Box::new(Expression::Literal(Literal::Integer(3))),
+                })),
+            })
+        );
+
+        // LogicOr precedence
+        let mut parser = Parser::new("true || false && true");
+        let expr = parser.parse_expr().unwrap();
+        assert_eq!(
+            expr,
+            Expression::BinOp(BinOpExpression {
+                op: BinOp::LogicOr,
+                lhs: Box::new(Expression::Literal(Literal::Bool(true))),
+                rhs: Box::new(Expression::BinOp(BinOpExpression {
+                    op: BinOp::LogicAnd,
+                    lhs: Box::new(Expression::Literal(Literal::Bool(false))),
+                    rhs: Box::new(Expression::Literal(Literal::Bool(true))),
+                })),
+            })
+        );
+
+        // LogicAnd precedence
+        let mut parser = Parser::new("true && false == false");
+        let expr = parser.parse_expr().unwrap();
+        assert_eq!(
+            expr,
+            Expression::BinOp(BinOpExpression {
+                op: BinOp::LogicAnd,
+                lhs: Box::new(Expression::Literal(Literal::Bool(true))),
+                rhs: Box::new(Expression::BinOp(BinOpExpression {
+                    op: BinOp::Equal,
+                    lhs: Box::new(Expression::Literal(Literal::Bool(false))),
+                    rhs: Box::new(Expression::Literal(Literal::Bool(false))),
+                })),
+            })
+        );
+
+        // // Equal precedence
+        // let mut parser = Parser::new("x == y < z");
+        // let expr = parser.parse_expr().unwrap();
+        // assert_eq!(
+        //     expr,
+        //     Expression::BinOp(BinOpExpression {
+        //         op: BinOp::Equal,
+        //         lhs: Box::new(Expression::Identifier("x".into())),
+        //         rhs: Box::new(Expression::BinOp(BinOpExpression {
+        //             op: BinOp::LessThen,
+        //             lhs: Box::new(Expression::Identifier("y".into())),
+        //             rhs: Box::new(Expression::Identifier("z".into())),
+        //         })),
+        //     })
+        // );
+
+        // Compare precedence
+        let mut parser = Parser::new("x < y + z");
+        let expr = parser.parse_expr().unwrap();
+        assert_eq!(
+            expr,
+            Expression::BinOp(BinOpExpression {
+                op: BinOp::LessThen,
+                lhs: Box::new(Expression::Identifier("x".into())),
+                rhs: Box::new(Expression::BinOp(BinOpExpression {
+                    op: BinOp::Add,
+                    lhs: Box::new(Expression::Identifier("y".into())),
+                    rhs: Box::new(Expression::Identifier("z".into())),
+                })),
+            })
+        );
+
+        // BitOr precedence
+        let mut parser = Parser::new("x | y ^ z");
+        let expr = parser.parse_expr().unwrap();
+        assert_eq!(
+            expr,
+            Expression::BinOp(BinOpExpression {
+                op: BinOp::BitOr,
+                lhs: Box::new(Expression::Identifier("x".into())),
+                rhs: Box::new(Expression::BinOp(BinOpExpression {
+                    op: BinOp::BitXor,
+                    lhs: Box::new(Expression::Identifier("y".into())),
+                    rhs: Box::new(Expression::Identifier("z".into())),
+                })),
+            })
+        );
+
+        // BitXor precedence
+        let mut parser = Parser::new("x ^ y & z");
+        let expr = parser.parse_expr().unwrap();
+        assert_eq!(
+            expr,
+            Expression::BinOp(BinOpExpression {
+                op: BinOp::BitXor,
+                lhs: Box::new(Expression::Identifier("x".into())),
+                rhs: Box::new(Expression::BinOp(BinOpExpression {
+                    op: BinOp::BitAnd,
+                    lhs: Box::new(Expression::Identifier("y".into())),
+                    rhs: Box::new(Expression::Identifier("z".into())),
+                })),
+            })
+        );
+
+        // BitAnd precedence
+        let mut parser = Parser::new("x & y << z");
+        let expr = parser.parse_expr().unwrap();
+        assert_eq!(
+            expr,
+            Expression::BinOp(BinOpExpression {
+                op: BinOp::BitAnd,
+                lhs: Box::new(Expression::Identifier("x".into())),
+                rhs: Box::new(Expression::BinOp(BinOpExpression {
+                    op: BinOp::BitShl,
+                    lhs: Box::new(Expression::Identifier("y".into())),
+                    rhs: Box::new(Expression::Identifier("z".into())),
+                })),
+            })
+        );
+
+        // BitShift precedence
+        let mut parser = Parser::new("x << y + z");
+        let expr = parser.parse_expr().unwrap();
+        assert_eq!(
+            expr,
+            Expression::BinOp(BinOpExpression {
+                op: BinOp::BitShl,
+                lhs: Box::new(Expression::Identifier("x".into())),
+                rhs: Box::new(Expression::BinOp(BinOpExpression {
+                    op: BinOp::Add,
+                    lhs: Box::new(Expression::Identifier("y".into())),
+                    rhs: Box::new(Expression::Identifier("z".into())),
+                })),
+            })
+        );
+
+        // Term precedence
+        let mut parser = Parser::new("x + y * z");
+        let expr = parser.parse_expr().unwrap();
+        assert_eq!(
+            expr,
+            Expression::BinOp(BinOpExpression {
+                op: BinOp::Add,
+                lhs: Box::new(Expression::Identifier("x".into())),
+                rhs: Box::new(Expression::BinOp(BinOpExpression {
+                    op: BinOp::Mul,
+                    lhs: Box::new(Expression::Identifier("y".into())),
+                    rhs: Box::new(Expression::Identifier("z".into())),
+                })),
+            })
+        );
+
+        // Factor precedence
+        let mut parser = Parser::new("x * y as float");
+        let expr = parser.parse_expr().unwrap();
+        assert_eq!(
+            expr,
+            Expression::BinOp(BinOpExpression {
+                op: BinOp::Mul,
+                lhs: Box::new(Expression::Identifier("x".into())),
+                rhs: Box::new(Expression::BinOp(BinOpExpression {
+                    op: BinOp::Cast,
+                    lhs: Box::new(Expression::Identifier("y".into())),
+                    rhs: Box::new(Expression::Identifier("float".into())),
+                })),
+            })
+        );
+
+        // As precedence
+        let mut parser = Parser::new("x as y.z");
+        let expr = parser.parse_expr().unwrap();
+        assert_eq!(
+            expr,
+            Expression::BinOp(BinOpExpression {
+                op: BinOp::Cast,
+                lhs: Box::new(Expression::Identifier("x".into())),
+                rhs: Box::new(Expression::BinOp(BinOpExpression {
+                    op: BinOp::MemberAccess,
+                    lhs: Box::new(Expression::Identifier("y".into())),
+                    rhs: Box::new(Expression::Identifier("z".into())),
+                })),
+            })
+        );
+
+        // Prefix precedence
+        let mut parser = Parser::new("-x.y");
+        let expr = parser.parse_expr().unwrap();
+        assert_eq!(
+            expr,
+            Expression::PrefixOp(PrefixOpExpression {
+                op: PrefixOp::Neg,
+                rhs: Box::new(Expression::BinOp(BinOpExpression {
+                    op: BinOp::MemberAccess,
+                    lhs: Box::new(Expression::Identifier("x".into())),
+                    rhs: Box::new(Expression::Identifier("y".into())),
+                })),
+            })
+        );
+
+        // Postfix precedence
+        let mut parser = Parser::new("x?[0]");
+        let expr = parser.parse_expr().unwrap();
+        assert_eq!(
+            expr,
+            Expression::Index(IndexExpression {
+                name: Box::new(Expression::PostfixOp(PostfixOpExpression {
+                    op: PostfixOp::Try,
+                    lhs: Box::new(Expression::Identifier("x".into())),
+                })),
+                rhs: Box::new(Expression::Literal(Literal::Integer(0))),
+            })
+        );
+
+        // Call precedence
+        let mut parser = Parser::new("foo()(1)");
+        let expr = parser.parse_expr().unwrap();
+        assert_eq!(
+            expr,
+            Expression::FuncCall(FuncCallExpression {
+                name: Box::new(Expression::FuncCall(FuncCallExpression {
+                    name: Box::new(Expression::Identifier("foo".into())),
+                    args: vec![],
+                })),
+                args: vec![Expression::Literal(Literal::Integer(1))],
+            })
+        );
+
+        // Path precedence
+        let mut parser = Parser::new("foo::bar + baz");
+        let expr = parser.parse_expr().unwrap();
+        assert_eq!(
+            expr,
+            Expression::BinOp(BinOpExpression {
+                op: BinOp::Add,
+                lhs: Box::new(Expression::BinOp(BinOpExpression {
+                    op: BinOp::Path,
+                    lhs: Box::new(Expression::Identifier("foo".into())),
+                    rhs: Box::new(Expression::Identifier("bar".into())),
+                })),
+                rhs: Box::new(Expression::Identifier("baz".into())),
             })
         );
     }
@@ -789,10 +1094,10 @@ mod test {
     #[test]
     fn test_parse_if_expr() {
         let mut parser = Parser::new("if true { 1 } else { 2 }");
-        let expr = parser.parse_expr().unwrap();
+        let expr = parser.parse_if_expr().unwrap();
         assert_eq!(
             expr,
-            Expression::If(IfExpression {
+            IfExpression {
                 cond: Box::new(Expression::Literal(Literal::Bool(true))),
                 then_branch: Block {
                     stmts: vec![TopLevel::Expr(Expression::Literal(Literal::Integer(1)))]
@@ -802,8 +1107,37 @@ mod test {
                         stmts: vec![TopLevel::Expr(Expression::Literal(Literal::Integer(2)))]
                     }
                 })))
-            })
+            }
         );
+    }
+
+    #[test]
+    fn test_parse_let_stmt() {
+        let mut parser = Parser::new("let x = 10;");
+        let stmt = parser.parse_let_stmt().unwrap();
+        assert_eq!(
+            stmt,
+            LetStmt {
+                var: "x".into(),
+                ty: None,
+                expr: Some(Box::new(Expression::Literal(Literal::Integer(10))))
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_while_stmt() {
+        let mut parser = Parser::new("while true { 1 }");
+        let stmt = parser.parse_while_stmt().unwrap();
+        assert_eq!(
+            stmt,
+            WhileStmt {
+                cond: Box::new(Expression::Literal(Literal::Bool(true))),
+                body: Block {
+                    stmts: vec![TopLevel::Expr(Expression::Literal(Literal::Integer(1)))]
+                }
+            }
+        )
     }
 
     #[test]

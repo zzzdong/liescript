@@ -168,7 +168,7 @@ impl<'i> Tokenizer<'i> {
             "true" => Token::Literal(Literal::Bool(true)),
             "false" => Token::Literal(Literal::Bool(false)),
             kw if Keyword::STRS.contains(&kw) => {
-                let kw = Keyword::from_str(kw);
+                let kw = Keyword::from_str(kw).unwrap();
                 Token::Keyword(kw)
             }
             _ => Token::Ident(Identifier::new(got)),
@@ -193,12 +193,9 @@ impl<'i> Tokenizer<'i> {
 
         let start = self.pos();
 
-        let mut is_float = false;
-
         let i = self.eat_while(|c| c.is_ascii_digit() || c == '_');
-        if self.peek() == Some('.') {
+        if self.peek() == Some('.') && !self.starts_with("..") {
             self.advance(1);
-            is_float = true;
             let f = self.eat_while(|c| c.is_ascii_digit() || c == '_');
 
             let mut number = i.to_string();
@@ -377,7 +374,7 @@ impl<'i> Tokenizer<'i> {
         // try 3 byte
         if self.starts_with("..=") {
             self.advance(3);
-            return Ok(Token::Symbol(Symbol::DotDotEq));
+            return Ok(Token::Symbol(Symbol::DotDotEqual));
         }
 
         // try 2 byte
@@ -407,13 +404,15 @@ impl<'i> Tokenizer<'i> {
 
         let token = match peek {
             // num op
-            '+' | '-' | '*' | '/' | '%' | '^' |
+            '+' | '-' | '*' | '/' | '%' |
+            // bit op
+            '|' | '&' | '^' |
             // compare op
             '>' | '<' |
             // paren
             '(' | ')' | '[' | ']' | '{' | '}' |
             // others
-            ',' | ':' | ';' | '#' | '!' | '?' | '&' | '=' | '.' => {
+            ',' | ':' | ';' | '#' | '!' | '?' | '=' | '.' => {
                 Symbol::from_str(&peek.to_string()).ok().map(Token::Symbol)
             }
             _ => None,
@@ -741,10 +740,26 @@ mod test {
     }
 
     #[test]
-    fn test_tokenizer_error() {
-        let input = "0xZF";
-        let mut tokenizer = Tokenizer::new(input);
-        let t = tokenizer.next();
-        println!("{:?}", t);
+    fn test_tokenizer_cast() {
+        let input = "x * y as float";
+
+        let tokenizer = Tokenizer::new(input);
+
+        let tokens = tokenizer
+            .into_iter()
+            .filter_map(|r| r.ok().map(|span| span.inner))
+            .filter(|token| !token.is_whitespace())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            tokens,
+            vec![
+                Token::ident("x"),
+                Token::symbol("*"),
+                Token::ident("y"),
+                Token::keyword("as"),
+                Token::ident("float"),
+            ]
+        );
     }
 }

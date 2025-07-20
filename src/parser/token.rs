@@ -68,6 +68,11 @@ impl Token {
     pub(crate) fn symbol(s: &str) -> Token {
         Token::Symbol(Symbol::from_str(s).unwrap())
     }
+
+    pub(crate) fn keyword(s: &str) -> Token {
+        Token::Keyword(Keyword::from_str(s).unwrap())
+    }
+
     pub(crate) fn whitespace(s: &str) -> Token {
         Token::Whitespace(s.into())
     }

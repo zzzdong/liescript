@@ -148,14 +148,12 @@ pub struct StructField {
     pub ty: Type,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum Visibility {
     #[default]
     Pub,
     Priv,
 }
-
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {

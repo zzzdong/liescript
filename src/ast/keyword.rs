@@ -22,11 +22,11 @@ macro_rules! define_keywords {
                 Self::ALL.iter().copied()
             }
 
-            pub fn from_str(s: &str) -> Self {
+            pub fn from_str(s: &str) -> Option<Self> {
                 match s {
-                    $($str => Keyword::$name,)*
+                    $($str => Some(Keyword::$name),)*
                     _ => {
-                        unreachable!();
+                        None
                     }
 
                 }
@@ -43,14 +43,14 @@ macro_rules! define_keywords {
 
 define_keywords! {
     As => "as",
-    Bool => "bool",
+    // Bool => "bool",
     Break => "break",
-    Byte => "byte",
+    // Byte => "byte",
     Class => "class",
     Catch => "catch",
     Const => "const",
     Continue => "continue",
-    Char => "char",
+    // Char => "char",
     Crate => "crate",
     Else => "else",
     Enum => "enum",
@@ -58,13 +58,13 @@ define_keywords! {
     Extends => "extends",
     False => "false",
     Finally => "finally",
-    Float => "float",
+    // Float => "float",
     Fn => "fn",
     For => "for",
     If => "if",
     Impl => "impl",
     In => "in",
-    Int => "int",
+    // Int => "int",
     Let => "let",
     Loop => "loop",
     Match => "match",
@@ -77,7 +77,7 @@ define_keywords! {
     SelfValue => "self",
     SelfType => "Self",
     Static => "static",
-    Str => "str",
+    // Str => "str",
     Struct => "struct",
     Super => "super",
     Then => "then",

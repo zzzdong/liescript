@@ -40,12 +40,7 @@ impl Expression {
                 Self::traval_expr(rhs, level, f)?;
             }
             Expression::Index(IndexExpression { name: lhs, rhs }) => {
-                writeln!(
-                    f,
-                    "{:indent$}IndexOp",
-                    "",
-                    indent = level * LEVEL_INDENT
-                )?;
+                writeln!(f, "{:indent$}IndexOp", "", indent = level * LEVEL_INDENT)?;
 
                 level += 1;
 
@@ -171,15 +166,8 @@ impl Expression {
                 }
                 node
             }
-            Expression::Literal(lit) => {
-                
-
-                graph.add_node(format!("{lit:?}"))
-            }
-            Expression::Identifier(ident) => {
-                
-                graph.add_node(format!("{ident:?}"))
-            }
+            Expression::Literal(lit) => graph.add_node(format!("{lit:?}")),
+            Expression::Identifier(ident) => graph.add_node(format!("{ident:?}")),
             _ => {
                 unimplemented!("{expr:?}")
             }
