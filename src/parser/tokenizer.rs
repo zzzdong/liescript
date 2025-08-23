@@ -1,22 +1,20 @@
-use std::borrow::Cow;
-use std::fmt;
 use std::str::Chars;
 
-use super::token::{Token, TokenStream};
-use crate::ast::{Identifier, Keyword, Literal, Symbol};
+use crate::ast::token::{Token, TokenSpan};
+use crate::ast::{ident::Identifier, keyword::Keyword, literal::Literal, symbol::Symbol};
 use crate::diagnostic::{Pos, Span, Spanned};
 
 #[derive(Debug)]
 pub struct TokenError {
-    pub(crate) detail: Option<Cow<'static, str>>,
-    source: Option<Box<dyn std::error::Error + Send + Sync>>,
-    span: Option<Span>,
+    pub message: String,
+    pub source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    pub span: Option<Span>,
 }
 
 impl TokenError {
-    pub fn new<D: Into<Cow<'static, str>>>(detail: D) -> TokenError {
+    pub fn new(message: impl Into<String>) -> TokenError {
         TokenError {
-            detail: Some(detail.into()),
+            message: message.into(),
             source: None,
             span: None,
         }
@@ -30,6 +28,35 @@ impl TokenError {
     pub fn with_span(mut self, span: Span) -> TokenError {
         self.span = Some(span);
         self
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    pub fn span(&self) -> Option<Span> {
+        self.span
+    }
+}
+
+impl std::fmt::Display for TokenError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)?;
+        if let Some(source) = &self.source {
+            write!(f, ", {}", source)?;
+        }
+        if let Some(span) = &self.span {
+            write!(f, " at {:?}", span)?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for TokenError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.source
+            .as_ref()
+            .map(|e| e.as_ref() as &dyn std::error::Error)
     }
 }
 
@@ -55,11 +82,11 @@ impl<'i> Tokenizer<'i> {
         self.pos
     }
 
-    fn new_token(&self, token: Token, span: Span) -> Spanned<Token> {
+    fn new_token(&self, token: Token, span: Span) -> TokenSpan {
         Spanned::new(token, span)
     }
 
-    pub fn next_token(&mut self) -> Result<Spanned<Token>, TokenError> {
+    pub fn next_token(&mut self) -> Result<TokenSpan, TokenError> {
         let start = self.pos();
 
         self.next_token_inner()
@@ -339,7 +366,7 @@ impl<'i> Tokenizer<'i> {
         Err(TokenError::new("incompleted qouted"))
     }
 
-    fn eat_tree(&mut self) -> Result<Spanned<Token>, TokenError> {
+    fn eat_tree(&mut self) -> Result<TokenSpan, TokenError> {
         let mut group = Vec::new();
 
         let _open = self.next_char().unwrap();
@@ -351,7 +378,7 @@ impl<'i> Tokenizer<'i> {
 
             let token = self.next_token()?;
 
-            match token.inner {
+            match token.value {
                 Token::Eof => {
                     return Err(TokenError::new("unclose group"));
                 }
@@ -425,29 +452,40 @@ impl<'i> Tokenizer<'i> {
 
         Err(TokenError::new(format!("unknown({peek})")))
     }
-
-    pub fn token_stream(self) -> Result<TokenStream, TokenError> {
-        let tokens: Result<Vec<_>, TokenError> = self.into_iter().collect();
-        tokens.map(TokenStream::new)
-    }
 }
 
-impl<'i> fmt::Debug for Tokenizer<'i> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Tokenizer")
-            .field("input", &self.input)
-            .finish()
-    }
-}
+// impl<'i> fmt::Debug for Tokenizer<'i> {
+//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//         f.debug_struct("Tokenizer")
+//             .field("input", &self.input)
+//             .finish()
+//     }
+// }
 
 impl<'i> Iterator for Tokenizer<'i> {
-    type Item = Result<Spanned<Token>, TokenError>;
+    type Item = Result<TokenSpan, TokenError>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.next_token() {
-            Ok(t) if t.inner == Token::Eof => None,
+            Ok(t) if t.value == Token::Eof => None,
             t => Some(t),
         }
+    }
+}
+
+pub struct TokenStream {
+    tokens: Vec<TokenSpan>,
+}
+
+impl TokenStream {
+    pub fn new(input: &str) -> Result<Self, TokenError> {
+        let tokens = Tokenizer::new(input).collect::<Result<Vec<_>, _>>()?;
+
+        Ok(TokenStream { tokens })
+    }
+
+    pub fn iter<'i>(&'i self) -> std::slice::Iter<'_, TokenSpan> {
+        self.tokens.iter()
     }
 }
 
@@ -462,7 +500,7 @@ mod test {
 
         let tokens = tokenizer
             .into_iter()
-            .filter_map(|r| r.ok().map(|span| span.inner))
+            .filter_map(|r| r.ok().map(|span| span.value))
             .filter(|token| !token.is_whitespace())
             .collect::<Vec<_>>();
 
@@ -485,7 +523,7 @@ mod test {
 
         let tokens = tokenizer
             .into_iter()
-            .filter_map(|r| r.ok().map(|span| span.inner))
+            .filter_map(|r| r.ok().map(|span| span.value))
             .filter(|token| !token.is_whitespace())
             .collect::<Vec<_>>();
 
@@ -505,7 +543,7 @@ mod test {
 
         let tokens = tokenizer
             .into_iter()
-            .filter_map(|r| r.ok().map(|span| span.inner))
+            .filter_map(|r| r.ok().map(|span| span.value))
             .filter(|token| !token.is_whitespace())
             .collect::<Vec<_>>();
 
@@ -526,7 +564,7 @@ mod test {
 
         let tokens = tokenizer
             .into_iter()
-            .filter_map(|r| r.ok().map(|span| span.inner))
+            .filter_map(|r| r.ok().map(|span| span.value))
             .filter(|token| !token.is_whitespace())
             .collect::<Vec<_>>();
 
@@ -546,7 +584,7 @@ mod test {
 
         let tokens = tokenizer
             .into_iter()
-            .filter_map(|r| r.ok().map(|span| span.inner))
+            .filter_map(|r| r.ok().map(|span| span.value))
             .filter(|token| !token.is_whitespace())
             .collect::<Vec<_>>();
 
@@ -566,7 +604,7 @@ mod test {
 
         let tokens = tokenizer
             .into_iter()
-            .filter_map(|r| r.ok().map(|span| span.inner))
+            .filter_map(|r| r.ok().map(|span| span.value))
             .filter(|token| !token.is_whitespace())
             .collect::<Vec<_>>();
 
@@ -590,7 +628,7 @@ mod test {
 
         let tokens = tokenizer
             .into_iter()
-            .filter_map(|r| r.ok().map(|span| span.inner))
+            .filter_map(|r| r.ok().map(|span| span.value))
             .filter(|token| !token.is_whitespace())
             .collect::<Vec<_>>();
 
@@ -618,7 +656,7 @@ mod test {
 
         let tokens = tokenizer
             .into_iter()
-            .filter_map(|r| r.ok().map(|span| span.inner))
+            .filter_map(|r| r.ok().map(|span| span.value))
             .filter(|token| !token.is_whitespace())
             .collect::<Vec<_>>();
 
@@ -642,7 +680,7 @@ mod test {
 
         let tokens = tokenizer
             .into_iter()
-            .filter_map(|r| r.ok().map(|span| span.inner))
+            .filter_map(|r| r.ok().map(|span| span.value))
             .filter(|token| !token.is_whitespace())
             .collect::<Vec<_>>();
 
@@ -662,7 +700,7 @@ mod test {
 
         let tokens = tokenizer
             .into_iter()
-            .filter_map(|r| r.ok().map(|span| span.inner))
+            .filter_map(|r| r.ok().map(|span| span.value))
             .filter(|token| !token.is_whitespace())
             .collect::<Vec<_>>();
 
@@ -686,7 +724,7 @@ mod test {
 
         let tokens = tokenizer
             .into_iter()
-            .filter_map(|r| r.ok().map(|span| span.inner))
+            .filter_map(|r| r.ok().map(|span| span.value))
             .filter(|token| !token.is_whitespace())
             .collect::<Vec<_>>();
 
@@ -717,7 +755,7 @@ mod test {
 
         let tokens = tokenizer
             .into_iter()
-            .filter_map(|r| r.ok().map(|span| span.inner))
+            .filter_map(|r| r.ok().map(|span| span.value))
             .filter(|token| !token.is_whitespace())
             .collect::<Vec<_>>();
 
@@ -747,7 +785,7 @@ mod test {
 
         let tokens = tokenizer
             .into_iter()
-            .filter_map(|r| r.ok().map(|span| span.inner))
+            .filter_map(|r| r.ok().map(|span| span.value))
             .filter(|token| !token.is_whitespace())
             .collect::<Vec<_>>();
 

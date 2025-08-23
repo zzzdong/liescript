@@ -4,6 +4,13 @@ use crate::ast::Identifier;
 
 use super::expression::Expression;
 
+
+
+
+
+
+
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum TopLevel {
     /// An empty statement.
@@ -157,22 +164,11 @@ pub enum Visibility {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
-    Primitive(PrimitiveTy),
-    Array(TypeArray),
+    SelfType,
     Path(TypePath),
+    Array(TypeArray),
     Reference(Box<Type>),
 }
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum PrimitiveTy {
-    Bool,
-    Byte,
-    Char,
-    Int,
-    Float,
-    Str,
-}
-
 /// A fixed size array type: `[T; n]`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeArray {

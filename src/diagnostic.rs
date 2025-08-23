@@ -2,31 +2,48 @@ use std::{fmt, ops::Deref};
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub struct Spanned<T> {
-    pub inner: T,
+    pub value: T,
     pub span: Span,
 }
 
 impl<T> Spanned<T> {
-    pub fn new(inner: T, span: Span) -> Self {
-        Spanned { inner, span }
+    pub fn new(value: T, span: Span) -> Self {
+        Spanned { value, span }
+    }
+
+    pub fn span(&self) -> Span {
+        self.span
+    }
+
+    pub fn value(&self) -> &T {
+        &self.value
+    }
+
+
+
+    pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Spanned<U> {
+        Spanned {
+            value: f(self.value),
+            span: self.span,
+        }
     }
 }
 
 impl<T: fmt::Debug> fmt::Display for Spanned<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}@{}", self.inner, self.span)
+        write!(f, "{:?}@{}", self.value, self.span)
     }
 }
 
 impl<T: PartialEq> PartialEq<T> for Spanned<T> {
     fn eq(&self, other: &T) -> bool {
-        &self.inner == other
+        &self.value == other
     }
 }
 
 impl<T> AsRef<T> for Spanned<T> {
     fn as_ref(&self) -> &T {
-        &self.inner
+        &self.value
     }
 }
 
@@ -34,7 +51,7 @@ impl<T> Deref for Spanned<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        &self.inner
+        &self.value
     }
 }
 
@@ -54,7 +71,7 @@ impl fmt::Display for Span {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{}:{}..{}:{}",
+            "{}:{}-{}:{}",
             self.start.line, self.start.column, self.end.line, self.end.column
         )
     }

@@ -1,3 +1,2 @@
-mod parser;
-mod token;
+mod parse;
 mod tokenizer;
