@@ -478,7 +478,11 @@ pub struct TokenStream {
 }
 
 impl TokenStream {
-    pub fn new(input: &str) -> Result<Self, TokenError> {
+    pub fn new(tokens: Vec<TokenSpan>) -> Self {
+        TokenStream { tokens }
+    }
+
+    pub fn parse(input: &str) -> Result<Self, TokenError> {
         let tokens = Tokenizer::new(input).collect::<Result<Vec<_>, _>>()?;
 
         Ok(TokenStream { tokens })

@@ -5,5 +5,6 @@ pub mod op;
 pub mod symbol;
 pub mod syntax;
 pub mod token;
+pub mod precedence;
 
 pub use syntax::*;

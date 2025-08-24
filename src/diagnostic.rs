@@ -19,8 +19,6 @@ impl<T> Spanned<T> {
         &self.value
     }
 
-
-
     pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Spanned<U> {
         Spanned {
             value: f(self.value),
@@ -55,7 +53,7 @@ impl<T> Deref for Spanned<T> {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Default)]
 pub struct Span {
     pub start: Pos,
     pub end: Pos,
@@ -64,6 +62,13 @@ pub struct Span {
 impl Span {
     pub fn new(start: Pos, end: Pos) -> Self {
         Span { start, end }
+    }
+
+    pub fn join(self, other: Span) -> Self {
+        Span {
+            start: self.start,
+            end: other.end,
+        }
     }
 }
 
@@ -95,3 +100,15 @@ impl Pos {
         }
     }
 }
+
+impl Default for Pos {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// impl fmt::Display for Pos {
+//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//         write!(f, "{}:{}:{}:{}", self.file, self.line, self.column, self.offset)
+//     }
+// }

@@ -4,7 +4,7 @@ use crate::ast::ident::Identifier;
 use crate::ast::keyword::Keyword;
 use crate::ast::literal::Literal;
 use crate::ast::symbol::Symbol;
-use crate::diagnostic::Spanned;
+use crate::diagnostic::{Span, Spanned};
 
 pub type TokenSpan = Spanned<Token>;
 
@@ -134,27 +134,117 @@ impl Token {
     }
 }
 
+impl From<Identifier> for Token {
+    fn from(ident: Identifier) -> Self {
+        Token::Ident(ident)
+    }
+}
+
+impl From<Literal> for Token {
+    fn from(literal: Literal) -> Self {
+        Token::Literal(literal)
+    }
+}
+
+impl From<Keyword> for Token {
+    fn from(keyword: Keyword) -> Self {
+        Token::Keyword(keyword)
+    }
+}
+
+impl From<Symbol> for Token {
+    fn from(symbol: Symbol) -> Self {
+        Token::Symbol(symbol)
+    }
+}
+
 /// `[]`
+#[derive(Debug)]
 pub struct Bracket {
     pub open: TokenSpan,
     pub close: TokenSpan,
 }
 
+impl Bracket {
+    pub fn new(open: TokenSpan, close: TokenSpan) -> Self {
+        Self { open, close }
+    }
+
+    pub fn span(&self) -> Span {
+        Span::new(self.open.span().start, self.close.span().end)
+    }
+}
+
 /// `()`
+#[derive(Debug)]
 pub struct Paren {
     pub open: TokenSpan,
     pub close: TokenSpan,
 }
 
+impl Paren {
+    pub fn new(open: TokenSpan, close: TokenSpan) -> Self {
+        Self { open, close }
+    }
+
+    pub fn span(&self) -> Span {
+        Span::new(self.open.span().start, self.close.span().end)
+    }
+}
+
 /// `{}`
+#[derive(Debug)]
 pub struct Brace {
     pub open: TokenSpan,
     pub close: TokenSpan,
 }
 
+impl Brace {
+    pub fn new(open: TokenSpan, close: TokenSpan) -> Self {
+        Self { open, close }
+    }
+
+    pub fn span(&self) -> Span {
+        Span::new(self.open.span().start, self.close.span().end)
+    }
+}
+
+#[derive(Debug)]
 pub struct Punctuated<T> {
     pub items: Vec<(T, TokenSpan)>,
     pub last: Option<Box<T>>,
+}
+
+impl<T> Punctuated<T> {
+    pub fn new() -> Self {
+        Punctuated {
+            items: Vec::new(),
+            last: None,
+        }
+    }
+
+    pub fn push(&mut self, item: T, punct: TokenSpan) {
+        self.items.push((item, punct));
+    }
+
+    pub fn push_last(&mut self, item: T) {
+        self.last = Some(Box::new(item));
+    }
+}
+
+impl<T> Punctuated<Spanned<T>> {
+    pub fn span(&self) -> Span {
+        let span = match (self.items.first(), self.items.last()) {
+            (Some((start, _)), Some((_, end))) => Span::new(start.span().start, end.span().end),
+
+            _ => Span::default(),
+        };
+
+        match &self.last {
+            Some(last) => Span::new(span.start, last.span().end),
+            None => span,
+        }
+    }
 }
 
 // #[derive(Clone, Debug)]

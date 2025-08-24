@@ -28,3 +28,10 @@ impl From<&str> for Identifier {
         Identifier::new(s)
     }
 }
+
+
+impl From<String> for Identifier {
+    fn from(s: String) -> Self {    
+        Identifier::new(s)
+    }
+}

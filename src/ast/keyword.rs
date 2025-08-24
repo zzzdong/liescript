@@ -92,4 +92,6 @@ define_keywords! {
     Await => "await",
     Async => "async",
     Gen => "gen",
+    Any => "any",
+    Dyn => "dyn",
 }

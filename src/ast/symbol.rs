@@ -91,6 +91,8 @@ RBracket    => "]",
 LBrace   => "{",
 RBrace   => "}",
 As => "as",
+Underscore => "_",
+// Colon2    => "::",
 // SQuotes    => "'",
 // DQuotes    => "\"",
 }
