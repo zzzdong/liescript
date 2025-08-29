@@ -29,9 +29,8 @@ impl From<&str> for Identifier {
     }
 }
 
-
 impl From<String> for Identifier {
-    fn from(s: String) -> Self {    
+    fn from(s: String) -> Self {
         Identifier::new(s)
     }
 }

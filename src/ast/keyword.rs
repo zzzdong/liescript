@@ -94,4 +94,5 @@ define_keywords! {
     Gen => "gen",
     Any => "any",
     Dyn => "dyn",
+    Mut => "mut",
 }

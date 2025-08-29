@@ -112,3 +112,8 @@ impl Default for Pos {
 //         write!(f, "{}:{}:{}:{}", self.file, self.line, self.column, self.offset)
 //     }
 // }
+
+
+pub trait HasSpan {
+    fn span(&self) -> Span;
+}

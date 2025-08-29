@@ -7,20 +7,20 @@ use super::op::BinOp;
 #[repr(u8)]
 pub enum Precedence {
     None = 0,
-    Assignment = 1,    // = += -= *= /= %= &= |= ^= <<= >>=
-    Range = 2,        // .. ..=
-    LogicalOr = 3,    // ||
-    LogicalAnd = 4,   // &&
-    BitwiseOr = 5,    // |
-    BitwiseXor = 6,   // ^
-    BitwiseAnd = 7,   // &
-    Equality = 8,     // == !=
-    Comparison = 9,   // < > <= >=
-    Shift = 10,       // << >>
-    Additive = 11,    // + -
+    Assignment = 1,      // = += -= *= /= %= &= |= ^= <<= >>=
+    Range = 2,           // .. ..=
+    LogicalOr = 3,       // ||
+    LogicalAnd = 4,      // &&
+    BitwiseOr = 5,       // |
+    BitwiseXor = 6,      // ^
+    BitwiseAnd = 7,      // &
+    Equality = 8,        // == !=
+    Comparison = 9,      // < > <= >=
+    Shift = 10,          // << >>
+    Additive = 11,       // + -
     Multiplicative = 12, // * / %
-    Unary = 13,       // ! - * & 
-    Call = 14,        // () [] . ??
+    Unary = 13,          // ! - * &
+    Call = 14,           // () [] . ??
     Primary = 15,
 }
 
@@ -38,7 +38,9 @@ impl Precedence {
             BitShl | BitShr => Precedence::Shift,
             Equal | NotEqual => Precedence::Equality,
             LessThen | LessThenOrEqual | GreaterThen | GreaterThenOrEqual => Precedence::Comparison,
-            Assign | AddAssign | SubAssign | MulAssign | DivAssign | RemAssign => Precedence::Assignment,
+            Assign | AddAssign | SubAssign | MulAssign | DivAssign | RemAssign => {
+                Precedence::Assignment
+            }
             Range | RangeInclusive => Precedence::Range,
         }
     }
