@@ -1,4 +1,5 @@
-mod ast;
+mod syntax;
+mod lexical;
 mod bytecode;
 mod diagnostic;
 mod error;

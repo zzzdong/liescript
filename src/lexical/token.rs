@@ -1,22 +1,60 @@
-use std::{fmt, slice};
+use std::{fmt, slice, str::FromStr};
 
-use crate::ast::ident::Identifier;
-use crate::ast::keyword::Keyword;
-use crate::ast::literal::Literal;
-use crate::ast::symbol::Symbol;
+use super::ident::Identifier;
+use super::keyword::Keyword;
+use super::literal::Literal;
+use super::symbol::Symbol;
 use crate::diagnostic::{Span, Spanned};
+
+#[macro_export]
+macro_rules! token {
+    ($s:expr) => {{
+        use $crate::lexical::Token;
+        use $crate::lexical::keyword::Keyword;
+
+        match $s {
+            // 处理关键字
+            s if Keyword::from_str(s).is_ok() => Token::Keyword(Keyword::from_str(s).unwrap()),
+            // 处理字面量
+            s if s.starts_with('\"') => {
+                Token::Literal(Literal::String(s.trim_matches('\"').to_string()))
+            }
+            s if s.parse::<i64>().is_ok() => Token::Literal(Literal::Integer(s.parse().unwrap())),
+            s if s.parse::<f64>().is_ok() => Token::Literal(Literal::Float(s.parse().unwrap())),
+            // 处理标点符号
+            s if Symbol::from_str(s).is_some() => Token::Symbol(Punct::from_str(s).unwrap()),
+            // 默认作为标识符
+            s => Token::Ident(Identifier::new(s)),
+        }
+    }};
+}
 
 pub type TokenSpan = Spanned<Token>;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Token {
+    /// 标识符: [a-zA-Z_][a-zA-Z0-9_]*
     Ident(Identifier),
+
+    /// 字面量: 数字/字符串/字符等
     Literal(Literal),
+
+    /// 关键字: if/else/fn等
     Keyword(Keyword),
+
+    /// 标点符号
     Symbol(Symbol),
+
+    /// 空白: 空格/制表符/换行等
     Whitespace(String),
+
+    /// 注释: // 或 /* */
     Comment(String),
+
+    /// 树结构: 用于分组
     Tree(Vec<TokenSpan>),
+
+    /// 文件结束标记
     Eof,
 }
 
@@ -36,6 +74,7 @@ impl Token {
     pub fn is_symbol(&self) -> bool {
         matches!(self, Token::Symbol(_))
     }
+
     pub fn is_whitespace(&self) -> bool {
         matches!(self, Token::Whitespace(_))
     }
@@ -80,57 +119,63 @@ impl Token {
 impl fmt::Display for Token {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Token::Ident(ident) => {
-                write!(f, "{}", ident.as_str())
+            Token::Ident(ident) => write!(f, "{}", ident),
+            Token::Literal(lit) => write!(f, "{}", lit),
+            Token::Keyword(kw) => write!(f, "{}", kw),
+            Token::Symbol(p) => write!(f, "{}", p),
+            Token::Whitespace(_) => write!(f, " "),
+            Token::Comment(c) => write!(f, "{}", c),
+            Token::Tree(tokens) => {
+                write!(f, "(")?;
+                for token in tokens {
+                    write!(f, "{} ", token)?;
+                }
+                write!(f, ")")
             }
-            Token::Literal(lit) => {
-                write!(f, "{lit}")
-            }
-            Token::Keyword(kw) => {
-                write!(f, "{}", kw.as_str())
-            }
-            Token::Symbol(sym) => {
-                write!(f, "{}", sym.as_str())
-            }
-            Token::Whitespace(ws) => {
-                write!(f, "{}", ws.as_str())
-            }
-            Token::Comment(c) => {
-                write!(f, "{}", c.as_str())
-            }
-            Token::Tree(t) => {
-                write!(f, "Tree({t:?})")
-            }
-            Token::Eof => {
-                write!(f, "EOF")
-            }
+            Token::Eof => write!(f, ""),
         }
     }
 }
 
 impl Token {
-    pub(crate) fn ident(ident: impl ToString) -> Token {
+    pub fn ident(ident: impl ToString) -> Token {
         Token::Ident(Identifier::new(ident))
     }
-    pub(crate) fn int(i: i64) -> Token {
+
+    pub fn int(i: i64) -> Token {
         Token::Literal(Literal::Integer(i))
     }
-    pub(crate) fn float(f: f64) -> Token {
+
+    pub fn float(f: f64) -> Token {
         Token::Literal(Literal::Float(f))
     }
-    pub(crate) fn string(s: impl ToString) -> Token {
+
+    pub fn string(s: impl ToString) -> Token {
         Token::Literal(Literal::String(s.to_string()))
     }
-    pub(crate) fn symbol(s: &str) -> Token {
-        Token::Symbol(Symbol::from_str(s).unwrap())
+
+    pub fn char(c: char) -> Token {
+        Token::Literal(Literal::Char(c))
     }
 
-    pub(crate) fn keyword(s: &str) -> Token {
+    pub fn keyword(s: &str) -> Token {
         Token::Keyword(Keyword::from_str(s).unwrap())
     }
 
-    pub(crate) fn whitespace(s: &str) -> Token {
+    pub fn symbol(s: &str) -> Option<Token> {
+        Symbol::from_str(s).map(Token::Symbol)
+    }
+
+    pub fn whitespace(s: &str) -> Token {
         Token::Whitespace(s.into())
+    }
+
+    pub fn comment(s: &str) -> Token {
+        Token::Comment(s.into())
+    }
+
+    pub fn eof() -> Token {
+        Token::Eof
     }
 }
 
@@ -149,12 +194,6 @@ impl From<Literal> for Token {
 impl From<Keyword> for Token {
     fn from(keyword: Keyword) -> Self {
         Token::Keyword(keyword)
-    }
-}
-
-impl From<Symbol> for Token {
-    fn from(symbol: Symbol) -> Self {
-        Token::Symbol(symbol)
     }
 }
 
@@ -206,6 +245,55 @@ impl Brace {
 
     pub fn span(&self) -> Span {
         Span::new(self.open.span().start, self.close.span().end)
+    }
+}
+
+pub trait BracketPair {
+    fn span(&self) -> Span;
+
+    fn open(&self) -> TokenSpan;
+    fn close(&self) -> TokenSpan;
+}
+
+impl BracketPair for Bracket {
+    fn span(&self) -> Span {
+        self.span()
+    }
+
+    fn open(&self) -> TokenSpan {
+        self.open.clone()
+    }
+
+    fn close(&self) -> TokenSpan {
+        self.close.clone()
+    }
+}
+
+impl BracketPair for Paren {
+    fn span(&self) -> Span {
+        self.span()
+    }
+
+    fn open(&self) -> TokenSpan {
+        self.open.clone()
+    }
+
+    fn close(&self) -> TokenSpan {
+        self.close.clone()
+    }
+}
+
+impl BracketPair for Brace {
+    fn span(&self) -> Span {
+        self.span()
+    }
+
+    fn open(&self) -> TokenSpan {
+        self.open.clone()
+    }
+
+    fn close(&self) -> TokenSpan {
+        self.close.clone()
     }
 }
 

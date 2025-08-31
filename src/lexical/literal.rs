@@ -1,5 +1,9 @@
 use std::fmt;
 
+use crate::diagnostic::Spanned;
+
+pub type LiteralSpan = Spanned<Literal>;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Literal {
     Bool(bool),

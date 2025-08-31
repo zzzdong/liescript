@@ -1,7 +1,7 @@
 use std::str::Chars;
 
-use crate::ast::token::{Token, TokenSpan};
-use crate::ast::{ident::Identifier, keyword::Keyword, literal::Literal, symbol::Symbol};
+use super::token::{Token, TokenSpan};
+use super::{ident::Identifier, keyword::Keyword, literal::Literal, symbol::Symbol};
 use crate::diagnostic::{Pos, Span, Spanned};
 
 #[derive(Debug)]
@@ -155,6 +155,11 @@ impl<'i> Tokenizer<'i> {
 
     fn peek(&mut self) -> Option<char> {
         self.chars.clone().next()
+    }
+
+    /// 查看第n个字符而不移动指针 (0-based)
+    fn peek_n(&self, n: usize) -> Option<char> {
+        self.chars.clone().nth(n)
     }
 
     fn eat_while<P>(&mut self, mut predicate: P) -> &'i str
@@ -398,59 +403,77 @@ impl<'i> Tokenizer<'i> {
     }
 
     fn eat_symbol(&mut self, peek: char) -> Result<Token, TokenError> {
-        // try 3 byte
-        if self.starts_with("..=") {
-            self.advance(3);
-            return Ok(Token::Symbol(Symbol::DotDotEqual));
+        // 优化：优先处理3字符标点
+        if let Some(p) = match (peek, self.peek_n(1), self.peek_n(2)) {
+            ('.', Some('.'), Some('=')) => Some((Symbol::DotDotEq, 3)),
+            _ => None
+        } {
+            self.advance(p.1);
+            return Ok(Token::Symbol(p.0));
         }
 
-        // try 2 byte
-        if self.has_at_lease(2) {
-            let pat = &self.chars.clone().as_str()[..2];
-            let token = match pat {
-                // logic op
-                "&&" | "||" |
-                // assign
-                "+=" | "-=" | "*=" | "/=" | "%=" | "^=" | "&=" | "|=" |
-                // compare op
-                "==" | "!=" | ">=" | "<=" |
-                // shift
-                "<<" | ">>" |
-                // others
-                "::" | ".." | "->" | "=>" => {
-                    Symbol::from_str(pat).ok().map(Token::Symbol)
-                }
-                _ => None,
-            };
-
-            if let Some(t) = token {
-                self.advance(2);
-                return Ok(t);
-            }
+        // 优化：直接处理2字符标点
+        if let Some(p) = match (peek, self.peek_n(1)) {
+            ('&', Some('&')) => Some((Symbol::AndAnd, 2)),
+            ('|', Some('|')) => Some((Symbol::OrOr, 2)),
+            ('+', Some('=')) => Some((Symbol::PlusEq, 2)),
+            ('-', Some('=')) => Some((Symbol::MinusEq, 2)),
+            ('*', Some('=')) => Some((Symbol::StarEq, 2)),
+            ('/', Some('=')) => Some((Symbol::SlashEq, 2)),
+            ('%', Some('=')) => Some((Symbol::PercentEq, 2)),
+            ('^', Some('=')) => Some((Symbol::CaretEq, 2)),
+            ('&', Some('=')) => Some((Symbol::AndEq, 2)),
+            ('|', Some('=')) => Some((Symbol::OrEq, 2)),
+            ('=', Some('=')) => Some((Symbol::EqEq, 2)),
+            ('!', Some('=')) => Some((Symbol::Ne, 2)),
+            ('>', Some('=')) => Some((Symbol::Ge, 2)),
+            ('<', Some('=')) => Some((Symbol::Le, 2)),
+            ('<', Some('<')) => Some((Symbol::Shl, 2)),
+            ('>', Some('>')) => Some((Symbol::Shr, 2)),
+            (':', Some(':')) => Some((Symbol::ColonColon, 2)),
+            ('.', Some('.')) => Some((Symbol::DotDot, 2)),
+            ('-', Some('>')) => Some((Symbol::RArrow, 2)),
+            ('=', Some('>')) => Some((Symbol::FatArrow, 2)),
+            _ => None
+        } {
+            self.advance(p.1);
+            return Ok(Token::Symbol(p.0));
         }
 
         let token = match peek {
-            // num op
-            '+' | '-' | '*' | '/' | '%' |
-            // bit op
-            '|' | '&' | '^' |
-            // compare op
-            '>' | '<' |
-            // paren
-            '(' | ')' | '[' | ']' | '{' | '}' |
-            // others
-            ',' | ':' | ';' | '#' | '!' | '?' | '=' | '.' => {
-                Symbol::from_str(&peek.to_string()).ok().map(Token::Symbol)
-            }
+            '+' => Some(Symbol::Plus),
+            '-' => Some(Symbol::Minus),
+            '*' => Some(Symbol::Star),
+            '/' => Some(Symbol::Slash),
+            '%' => Some(Symbol::Percent),
+            '|' => Some(Symbol::Or),
+            '&' => Some(Symbol::And),
+            '^' => Some(Symbol::Caret),
+            '>' => Some(Symbol::Gt),
+            '<' => Some(Symbol::Lt),
+            '(' => Some(Symbol::LParen),
+            ')' => Some(Symbol::RParen),
+            '[' => Some(Symbol::LBracket),
+            ']' => Some(Symbol::RBracket),
+            '{' => Some(Symbol::LBrace),
+            '}' => Some(Symbol::RBrace),
+            ',' => Some(Symbol::Comma),
+            ':' => Some(Symbol::Colon),
+            ';' => Some(Symbol::Semi),
+            '#' => Some(Symbol::Pound),
+            '!' => Some(Symbol::Not),
+            '?' => Some(Symbol::Question),
+            '=' => Some(Symbol::Eq),
+            '.' => Some(Symbol::Dot),
             _ => None,
         };
 
-        if let Some(t) = token {
+        if let Some(p) = token {
             self.advance(1);
-            return Ok(t);
+            return Ok(Token::Symbol(p));
         }
 
-        Err(TokenError::new(format!("unknown({peek})")))
+        Err(TokenError::new(format!("unknown punctuation({peek})")))
     }
 }
 
@@ -513,9 +536,9 @@ mod test {
             vec![
                 Token::Keyword(Keyword::Let),
                 Token::Ident("x".into()),
-                Token::Symbol(Symbol::Equal),
+                Token::Symbol(Symbol::Eq),
                 Token::Literal(Literal::Integer(5)),
-                Token::Symbol(Symbol::Semicolon)
+                Token::Symbol(Symbol::Semi)
             ]
         );
     }
@@ -618,9 +641,9 @@ mod test {
                 Token::Comment(" This is a comment".to_string()),
                 Token::Keyword(Keyword::Let),
                 Token::Ident(Identifier::new("y")),
-                Token::Symbol(Symbol::Equal),
+                Token::Symbol(Symbol::Eq),
                 Token::Literal(Literal::Integer(10)),
-                Token::Symbol(Symbol::Semicolon),
+                Token::Symbol(Symbol::Semi),
             ]
         );
     }
@@ -644,10 +667,10 @@ mod test {
                 Token::Symbol(Symbol::Star),
                 Token::Symbol(Symbol::Slash),
                 Token::Symbol(Symbol::Percent),
-                Token::Symbol(Symbol::EqualEqual),
-                Token::Symbol(Symbol::NotEqual),
-                Token::Symbol(Symbol::GreatThen),
-                Token::Symbol(Symbol::LessThan),
+                Token::Symbol(Symbol::EqEq),
+                Token::Symbol(Symbol::Ne),
+                Token::Symbol(Symbol::Gt),
+                Token::Symbol(Symbol::Lt),
                 Token::Symbol(Symbol::FatArrow),
             ]
         );
@@ -735,17 +758,17 @@ mod test {
         assert_eq!(
             tokens,
             vec![
-                Token::Symbol(Symbol::NotEqual),
-                Token::Symbol(Symbol::PlusEqual),
-                Token::Symbol(Symbol::MinusEqual),
-                Token::Symbol(Symbol::StarEqual),
-                Token::Symbol(Symbol::SlashEqual),
-                Token::Symbol(Symbol::PercentEqual),
-                Token::Symbol(Symbol::CaretEqual),
-                Token::Symbol(Symbol::AndEqual),
-                Token::Symbol(Symbol::OrEqual),
-                Token::Symbol(Symbol::LShift),
-                Token::Symbol(Symbol::RShift),
+                Token::Symbol(Symbol::Ne),
+                Token::Symbol(Symbol::PlusEq),
+                Token::Symbol(Symbol::MinusEq),
+                Token::Symbol(Symbol::StarEq),
+                Token::Symbol(Symbol::SlashEq),
+                Token::Symbol(Symbol::PercentEq),
+                Token::Symbol(Symbol::CaretEq),
+                Token::Symbol(Symbol::AndEq),
+                Token::Symbol(Symbol::OrEq),
+                Token::Symbol(Symbol::Shl),
+                Token::Symbol(Symbol::Shr),
                 Token::Symbol(Symbol::RArrow),
                 Token::Symbol(Symbol::ColonColon),
             ]
@@ -769,13 +792,13 @@ mod test {
                 Token::Keyword(Keyword::If),
                 Token::Symbol(Symbol::LParen),
                 Token::Ident(Identifier::new("x")),
-                Token::Symbol(Symbol::GreatThen),
+                Token::Symbol(Symbol::Ge),
                 Token::Literal(Literal::Integer(5)),
                 Token::Symbol(Symbol::RParen),
                 Token::Symbol(Symbol::LBrace),
                 Token::Keyword(Keyword::Return),
                 Token::Ident(Identifier::new("x")),
-                Token::Symbol(Symbol::Semicolon),
+                Token::Symbol(Symbol::Semi),
                 Token::Symbol(Symbol::RBrace),
             ]
         );
@@ -797,7 +820,7 @@ mod test {
             tokens,
             vec![
                 Token::ident("x"),
-                Token::symbol("*"),
+                Token::Symbol(Symbol::Star),
                 Token::ident("y"),
                 Token::keyword("as"),
                 Token::ident("float"),

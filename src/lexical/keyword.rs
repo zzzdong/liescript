@@ -1,3 +1,8 @@
+use crate::diagnostic::Spanned;
+
+pub type KeywordSpan = Spanned<Keyword>;
+
+
 macro_rules! define_keywords {
     (
         $(
@@ -38,61 +43,79 @@ macro_rules! define_keywords {
                 }
             }
         }
+
+        impl std::fmt::Display for Keyword {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str(self.as_str())
+            }
+        }
     };
 }
 
 define_keywords! {
+    // 严格关键字(Strict keywords)
     As => "as",
-    // Bool => "bool",
     Break => "break",
-    // Byte => "byte",
-    Class => "class",
-    Catch => "catch",
     Const => "const",
     Continue => "continue",
-    // Char => "char",
     Crate => "crate",
     Else => "else",
     Enum => "enum",
     Extern => "extern",
-    Extends => "extends",
     False => "false",
-    Finally => "finally",
-    // Float => "float",
     Fn => "fn",
     For => "for",
     If => "if",
     Impl => "impl",
-    In => "in",
-    // Int => "int",
     Let => "let",
     Loop => "loop",
     Match => "match",
     Mod => "mod",
     Move => "move",
-    Priv => "priv",
+    Mut => "mut",
     Pub => "pub",
     Ref => "ref",
     Return => "return",
     SelfValue => "self",
     SelfType => "Self",
     Static => "static",
-    // Str => "str",
     Struct => "struct",
     Super => "super",
-    Then => "then",
-    Throw => "throw",
     Trait => "trait",
-    Try => "try",
+    True => "true",
     Type => "type",
     Unsafe => "unsafe",
     Use => "use",
     Where => "where",
     While => "while",
-    Await => "await",
+    In => "in",
+
+    // 保留关键字(Reserved keywords)
+    Abstract => "abstract",
+    Become => "become",
+    Box => "box",
+    Do => "do",
+    Final => "final",
+    Macro => "macro",
+    Override => "override",
+    Priv => "priv",
+    Try => "try",
+    Typeof => "typeof",
+    Unsized => "unsized",
+    Virtual => "virtual",
+    Yield => "yield",
+    
+    // 弱关键字(Weak keywords)
     Async => "async",
-    Gen => "gen",
-    Any => "any",
+    Await => "await",
     Dyn => "dyn",
-    Mut => "mut",
+    
+    // 类型关键字(Type keywords)
+    Any => "any",
+    Bool => "bool",
+    Byte => "byte",
+    Char => "char",
+    String => "string",
+    Int => "int",
+    Float => "float",
 }
