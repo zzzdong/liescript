@@ -1,7 +1,7 @@
 use super::{BinOp, Expression, Path, Pattern, RangeLimits, Type, UnOp};
 use crate::diagnostic::{HasSpan, Span, Spanned};
 use crate::lexical::{Brace, Bracket, IdentSpan, LiteralSpan, Paren, Punctuated, TokenSpan};
-use crate::syntax::Statement;
+use crate::syntax::{Statement, Visibility};
 
 /// 项声明语句，用于声明模块级别的项
 ///
@@ -329,6 +329,7 @@ impl HasSpan for StructFields {
 #[derive(Debug)]
 pub struct NamedFields {
     pub brace_token: Brace,
+    pub visibility: Option<Visibility>,
     pub fields: Punctuated<NamedField>,
 }
 
@@ -378,6 +379,7 @@ impl HasSpan for NamedField {
 #[derive(Debug)]
 pub struct TupleFields {
     pub paren_token: Paren,
+    pub visibility: Option<Visibility>,
     pub fields: Punctuated<TupleField>,
 }
 
@@ -396,12 +398,16 @@ impl HasSpan for TupleFields {
 /// 单个元组字段
 #[derive(Debug)]
 pub struct TupleField {
+    pub visibility: Option<Visibility>,
     pub ty: Box<Type>,
 }
 
 impl TupleField {
     pub fn span(&self) -> Span {
-        self.ty.span()
+        match &self.visibility {
+            Some(visibility) => Span::new(visibility.span().start, self.ty.span().end),
+            None => self.ty.span(),
+        }
     }
 }
 
@@ -669,22 +675,23 @@ impl HasSpan for UseItem {
 /// 导入树
 ///
 /// 根据Rust规范文档，导入树的定义为：
-/// UseTree → Path ( as IDENTIFIER )?
-///         | { UseTreeList? }
-///         | *
+/// UseTree →
+///       ( SimplePath? :: )? *
+///     | ( SimplePath? :: )? { ( UseTree ( , UseTree )* ,? )? }
+///     | SimplePath ( as ( IDENTIFIER | _ ) )?
 ///
 /// 参考：https://doc.rust-lang.org/reference/items/use-declarations.html
 #[derive(Debug)]
 pub enum UseTree {
-    /// 路径导入，如 `use std::io`
-    Path(UsePathTree),
-
+    /// 通配符导入，如 `use std::io::*`
+    Glob(UseGlobTree),
+    
     /// 分组导入，如 `use std::{io, fs}`
     Group(UseGroupTree),
-
-    /// 全部导入，如 `use std::io::*`
-    Glob(UseGlobTree),
-
+    
+    /// 路径导入，如 `use std::io`
+    Path(UsePathTree),
+    
     /// 重命名导入，如 `use std::io as IO`
     Rename(UseRenameTree),
 }
@@ -710,6 +717,7 @@ impl HasSpan for UseTree {
 #[derive(Debug)]
 pub struct UsePathTree {
     pub path: Path,
+    pub colon_colon: Option<TokenSpan>,
     pub tree: Option<Box<UseTree>>,
 }
 
@@ -751,9 +759,11 @@ impl HasSpan for UseGroupTree {
     }
 }
 
-/// 全部导入
+/// 通配符导入
 #[derive(Debug)]
 pub struct UseGlobTree {
+    pub prefix: Option<Path>,
+    pub colon_colon: Option<TokenSpan>,
     pub star_token: TokenSpan,
 }
 

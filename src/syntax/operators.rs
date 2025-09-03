@@ -1,61 +1,58 @@
 use std::fmt;
 
 use crate::diagnostic::Spanned;
-use crate::lexical::{Brace, Bracket, IdentSpan, Keyword, LiteralSpan, Paren, Punctuated, Symbol, Token, TokenSpan};
+use crate::lexical::{
+    Brace, Bracket, IdentSpan, Keyword, LiteralSpan, Paren, Punctuated, Symbol, Token, TokenSpan,
+};
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum UnOp {
     Neg,    // -
     Not,    // !
     Deref,  // *
+    Borrow, // &
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum BinOp {
-    Add,    // +
-    Sub,    // -
-    Mul,    // *
-    Div,    // /
-    Rem,    // %
-    BitAnd, // &
-    BitOr,  // |
-    BitXor, // ^
-    BitShl, // <<
-    BitShr, // >>
-    Eq,     // ==
-    NotEq,  // !=
-    LessThen, // <
-    LessThenOrEq, // <=
-    GreaterThen, // >
+    Add,             // +
+    Sub,             // -
+    Mul,             // *
+    Div,             // /
+    Rem,             // %
+    BitAnd,          // &
+    BitOr,           // |
+    BitXor,          // ^
+    BitShl,          // <<
+    BitShr,          // >>
+    Eq,              // ==
+    NotEq,           // !=
+    LessThen,        // <
+    LessThenOrEq,    // <=
+    GreaterThen,     // >
     GreaterThenOrEq, // >=
-    LogicAnd, // &&
-    LogicOr, // ||
-    Assign, // =
-    AddAssign, // +=
-    SubAssign, // -=
-    MulAssign, // *=
-    DivAssign, // /=
-    RemAssign, // %=
-    Range,  // ..
-    RangeInclusive, // ..=
-    Cast,   // as
+    LogicAnd,        // &&
+    LogicOr,         // ||
+    Assign,          // =
+    AddAssign,       // +=
+    SubAssign,       // -=
+    MulAssign,       // *=
+    DivAssign,       // /=
+    RemAssign,       // %=
+    Range,           // ..
+    RangeInclusive,  // ..=
+    Cast,            // as
 }
 
 pub type UnOpSpan = Spanned<UnOp>;
 pub type BinOpSpan = Spanned<BinOp>;
 
 impl UnOp {
-    pub const ALL: &'static [UnOp] = &[
-        UnOp::Neg,
-        UnOp::Not,
-        UnOp::Deref,
-    ];
+    pub const ALL: &'static [UnOp] = &[UnOp::Neg, UnOp::Not, UnOp::Deref];
 
-    pub const STRS: &'static [&'static str] = &[
-        "-", "!", "*"
-    ];
+    pub const STRS: &'static [&'static str] = &["-", "!", "*"];
 
-    pub fn all() -> impl Iterator<Item=UnOp> {
+    pub fn all() -> impl Iterator<Item = UnOp> {
         Self::ALL.iter().copied()
     }
 
@@ -65,6 +62,7 @@ impl UnOp {
                 "-" => Some(UnOp::Neg),
                 "!" => Some(UnOp::Not),
                 "*" => Some(UnOp::Deref),
+                "&" => Some(UnOp::Borrow),
                 _ => None,
             },
             _ => None,
@@ -76,6 +74,15 @@ impl UnOp {
             UnOp::Neg => "-",
             UnOp::Not => "!",
             UnOp::Deref => "*",
+            UnOp::Borrow => "&",
+        }
+    }
+
+    pub fn binding_power(&self) -> u8 {
+        use UnOp::*;
+
+        match self {
+            Neg | Not | Deref | Borrow => 130,
         }
     }
 }
@@ -111,14 +118,11 @@ impl BinOp {
     ];
 
     pub const STRS: &'static [&'static str] = &[
-        "+", "-", "*", "/", "%",
-        "&", "|", "^", "<<", ">>",
-        "==", "!=", "<", "<=", ">", ">=",
-        "&&", "||", "=", "+=", "-=", "*=", "/=", "%=",
-        "..", "..="
+        "+", "-", "*", "/", "%", "&", "|", "^", "<<", ">>", "==", "!=", "<", "<=", ">", ">=", "&&",
+        "||", "=", "+=", "-=", "*=", "/=", "%=", "..", "..=",
     ];
 
-    pub fn all() -> impl Iterator<Item=BinOp> {
+    pub fn all() -> impl Iterator<Item = BinOp> {
         Self::ALL.iter().copied()
     }
 
@@ -175,6 +179,48 @@ impl BinOp {
             BinOp::Cast => "as",
         }
     }
+
+    pub fn get_binding_power(&self) -> (u8, u8) {
+        use BinOp::*;
+
+        match self {
+            /* 最弱 10 级：右结合 */
+            Assign | AddAssign | SubAssign | MulAssign | DivAssign | RemAssign => (10, 11), // = += -= …  right
+
+            /* 20 级：不结合（需括号）*/
+            Range | RangeInclusive => (20, 19), // ..  ..=   non-assoc
+
+            /* 30 级：左结合 */
+            LogicOr => (30, 30), // ||
+
+            /* 40 级：左结合 */
+            LogicAnd => (40, 40), // &&
+
+            /* 50 级：不结合（比较类）*/
+            Eq | NotEq | LessThen | LessThenOrEq | GreaterThen | GreaterThenOrEq => (50, 49), // == != < … non-assoc
+
+            /* 60 级：左结合 */
+            BitOr => (60, 60), // |
+
+            /* 70 级：左结合 */
+            BitXor => (70, 70), // ^
+
+            /* 80 级：左结合 */
+            BitAnd => (80, 80), // &
+
+            /* 90 级：左结合 */
+            BitShl | BitShr => (90, 90), // <<  >>
+
+            /* 100 级：左结合 */
+            Add | Sub => (100, 100), // +  -
+
+            /* 110 级：左结合 */
+            Mul | Div | Rem => (110, 110), // *  /  %
+
+            /* 120 级：左结合 */
+            Cast => (120, 120), // as
+        }
+    }
 }
 
 impl fmt::Display for UnOp {
@@ -198,7 +244,7 @@ pub enum OpKind {
     Assign,
     Range,
     Access,
-    Cast,  // 处理as转换
+    Cast, // 处理as转换
     Decl,
     Path,
 }

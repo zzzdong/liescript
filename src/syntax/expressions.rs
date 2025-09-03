@@ -30,6 +30,16 @@ impl Expression {
             Expression::WithBlock(expr) => expr.span(),
         }
     }
+
+    pub fn is_field_expr(&self) -> bool {
+        match self {
+            Expression::WithoutBlock(expr) => match expr {
+                ExpressionWithoutBlock::Field(_) => true,
+                _ => false,
+            },
+            Expression::WithBlock(_) => false,
+        }
+    }
 }
 
 impl HasSpan for Expression {
@@ -706,12 +716,12 @@ impl HasSpan for MatchArmGuard {
 pub struct FieldExpression {
     pub expr: Box<Expression>,
     pub dot_token: TokenSpan,
-    pub ident: IdentSpan,
+    pub field: IdentSpan,
 }
 
 impl FieldExpression {
     pub fn span(&self) -> Span {
-        Span::new(self.expr.span().start, self.ident.span().end)
+        Span::new(self.expr.span().start, self.field.span().end)
     }
 }
 
@@ -865,7 +875,7 @@ pub enum ArrayExpression {
         bracket_token: Bracket,
         value: Box<Expression>,
         semi_token: TokenSpan,
-        count: Spanned<usize>,
+        count: Spanned<u32>,
     },
 }
 

@@ -248,54 +248,36 @@ impl Brace {
     }
 }
 
-pub trait BracketPair {
-    fn span(&self) -> Span;
-
-    fn open(&self) -> TokenSpan;
-    fn close(&self) -> TokenSpan;
+pub trait Bracketed {
+    type Output;
+    
+    fn bracketed(open: TokenSpan, close: TokenSpan) -> Self::Output;
 }
 
-impl BracketPair for Bracket {
-    fn span(&self) -> Span {
-        self.span()
-    }
+impl Bracketed for Bracket {
+    type Output = Self;
 
-    fn open(&self) -> TokenSpan {
-        self.open.clone()
-    }
-
-    fn close(&self) -> TokenSpan {
-        self.close.clone()
+    fn bracketed(open: TokenSpan, close: TokenSpan) -> Self {
+        Self::new(open, close)
     }
 }
 
-impl BracketPair for Paren {
-    fn span(&self) -> Span {
-        self.span()
-    }
+impl Bracketed for Paren {
+    type Output = Self;
 
-    fn open(&self) -> TokenSpan {
-        self.open.clone()
-    }
-
-    fn close(&self) -> TokenSpan {
-        self.close.clone()
+    fn bracketed(open: TokenSpan, close: TokenSpan) -> Self {
+        Self::new(open, close)
     }
 }
 
-impl BracketPair for Brace {
-    fn span(&self) -> Span {
-        self.span()
-    }
+impl Bracketed for Brace {
+    type Output = Self;
 
-    fn open(&self) -> TokenSpan {
-        self.open.clone()
-    }
-
-    fn close(&self) -> TokenSpan {
-        self.close.clone()
+    fn bracketed(open: TokenSpan, close: TokenSpan) -> Self {
+        Self::new(open, close)
     }
 }
+
 
 #[derive(Debug)]
 pub struct Punctuated<T> {
@@ -317,6 +299,17 @@ impl<T> Punctuated<T> {
 
     pub fn push_last(&mut self, item: T) {
         self.last = Some(Box::new(item));
+    }
+
+    pub fn len(&self) -> usize {
+        self.items.len() + self.last.is_some() as usize
+    }
+
+    pub fn last(&self) -> Option<&T> {
+        match &self.last {
+            Some(last) => Some(last),
+            None => self.items.last().map(|(item, _)| item),
+        }
     }
 }
 

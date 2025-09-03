@@ -3,8 +3,8 @@ use std::{borrow::Cow, iter::Peekable};
 use crate::{
     diagnostic::{Span, Spanned},
     lexical::{
-        Brace, Bracket, IdentSpan, Keyword, KeywordSpan, Literal, LiteralSpan, Paren, Punctuated,
-        Symbol, SymbolSpan, Token, TokenSpan, TokenStream, Tokenizer,
+        Brace, Bracket, Bracketed, IdentSpan, Keyword, KeywordSpan, Literal, LiteralSpan, Paren,
+        Punctuated, Symbol, SymbolSpan, Token, TokenSpan, TokenStream, Tokenizer,
     },
     syntax::Visibility,
 };
@@ -43,15 +43,6 @@ impl TokenMatcher for &[Token] {
         self.contains(token)
     }
 }
-
-// impl<F> TokenMatcher for F
-// where
-//     F: Fn(&Token) -> bool + std::fmt::Debug,
-// {
-//     fn matches(&self, token: &Token) -> bool {
-//         self(token)
-//     }
-// }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParseError {
@@ -160,11 +151,11 @@ impl<'i> ParseStream<'i> {
         matches!(self.iter.peek(), Some(t) if t.value.is_ident())
     }
 
-    pub fn expect_identifier(&mut self) -> Result<TokenSpan, ParseError> {
+    pub fn expect_identifier(&mut self) -> Result<IdentSpan, ParseError> {
         let tok = self.lookahead1()?;
 
         if let Token::Ident(_) = &tok.value {
-            return self.consume();
+            return self.consume().map(|t| t.map(|t| t.into_ident()));
         }
 
         Err(ParseError::new("Expected identifier")
@@ -193,6 +184,22 @@ impl<'i> ParseStream<'i> {
         Err(ParseError::new("Expected token")
             .with_span(tok.span)
             .with_expected(format!("{:?}", expected)))
+    }
+
+    pub fn expect_keyword(&mut self, kw: &str) -> Result<TokenSpan, ParseError> {
+        let keyword = Keyword::from_str(kw)
+            .ok_or_else(|| ParseError::new(format!("Invalid keyword: {}", kw)))?;
+        self.expect(&Token::Keyword(keyword))
+    }
+
+    pub fn expect_literal(&mut self) -> Result<TokenSpan, ParseError> {
+        let tok = self.lookahead1()?;
+        if !tok.is_literal() {
+            return Err(ParseError::new("Expected literal")
+                .with_span(tok.span)
+                .with_expected("literal"));
+        }
+        self.consume()
     }
 
     pub fn parse_optional<T>(&mut self) -> Option<T>
@@ -234,7 +241,7 @@ impl<'i> ParseStream<'i> {
 
         loop {
             match self.try_parse(T::parse) {
-                Ok(item) => {
+                Some(item) => {
                     if self.next_is(sep) {
                         items.push((item, self.consume()?));
                     } else {
@@ -242,7 +249,7 @@ impl<'i> ParseStream<'i> {
                         break;
                     }
                 }
-                Err(_) => {
+                None => {
                     break;
                 }
             }
@@ -257,7 +264,6 @@ impl<'i> ParseStream<'i> {
         sep: &Token,
     ) -> Result<Punctuated<T>, ParseError>
     where
-        T: Parse,
         F: Fn(&mut ParseStream) -> Result<T, ParseError>,
     {
         let mut items = Vec::new();
@@ -265,7 +271,7 @@ impl<'i> ParseStream<'i> {
 
         loop {
             match self.try_parse(&f) {
-                Ok(item) => {
+                Some(item) => {
                     if self.next_is(sep) {
                         items.push((item, self.consume()?));
                     } else {
@@ -273,13 +279,28 @@ impl<'i> ParseStream<'i> {
                         break;
                     }
                 }
-                Err(_) => {
+                None => {
                     break;
                 }
             }
         }
 
         Ok(Punctuated { items, last })
+    }
+
+    pub fn parse_bracketed<T>(
+        &mut self,
+        open: Token,
+        close: Token,
+    ) -> Result<((TokenSpan, TokenSpan), T), ParseError>
+    where
+        T: Parse,
+    {
+        let open = self.expect(&open)?;
+        let value = T::parse(self)?;
+        let close = self.expect(&close)?;
+
+        Ok(((open, close), value))
     }
 
     pub fn checkpoint(&self) -> Checkpoint<'i> {
@@ -398,9 +419,41 @@ impl Parse for usize {
         let token = stream.consume()?;
         let literal = token.value.into_literal();
 
-        // TODO: Support other numeric types
         if let Literal::Integer(lit) = literal {
             return Ok(lit as usize);
+        }
+
+        Err(ParseError::new("Expected literal")
+            .with_span(tok.span)
+            .with_expected("integer literal")
+            .with_found(tok.value.to_string()))
+    }
+}
+
+impl Parse for u32 {
+    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
+        let tok = stream.lookahead1()?;
+
+        if !tok.is_literal() {
+            return Err(ParseError::new("Expected literal")
+                .with_span(tok.span)
+                .with_expected("valid literal")
+                .with_found(tok.value.to_string()));
+        }
+
+        let token = stream.consume()?;
+        let literal = token.value.into_literal();
+
+        // TODO: Support other numeric types
+        if let Literal::Integer(lit) = literal {
+            if lit > u32::MAX as i64 || lit < 0 {
+                return Err(ParseError::new("Integer literal out of range for u32")
+                    .with_span(tok.span)
+                    .with_expected("integer literal")
+                    .with_found(tok.value.to_string()));
+            }
+
+            return Ok(lit as u32);
         }
 
         Err(ParseError::new("Expected literal")

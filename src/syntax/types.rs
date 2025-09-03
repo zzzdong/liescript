@@ -1,4 +1,4 @@
-use super::{BinOp, Path, Pattern, RangeLimits, Statement, Expression, UnOp};
+use super::{BinOp, Expression, Path, Pattern, RangeLimits, Statement, UnOp};
 use crate::diagnostic::{HasSpan, Span, Spanned};
 use crate::lexical::{Brace, Bracket, IdentSpan, LiteralSpan, Paren, Punctuated, TokenSpan};
 
@@ -15,6 +15,9 @@ use crate::lexical::{Brace, Bracket, IdentSpan, LiteralSpan, Paren, Punctuated, 
 /// TypeNoBounds → ParenthesizedType | ImplTraitTypeOneBound | TraitObjectTypeOneBound | TypePath | TupleType | NeverType | RawPointerType | ReferenceType | ArrayType | SliceType | InferredType | QualifiedPathInType | BareFunctionType | MacroInvocation
 #[derive(Debug)]
 pub enum Type {
+    /// 原生类型 `any`, `bool`, `byte`, `int`, `float`, `char`, `string`
+    Primitive(Primitive),
+
     /// 括号类型，如 `(i32)`
     ///
     /// 示例：
@@ -90,29 +93,65 @@ pub enum Type {
     /// let f: fn(i32) -> i32 = |x| x + 1;
     /// ```
     BareFn(BareFunctionType),
+}
 
-    /// Any
-    Any(AnyType),
+impl HasSpan for Type {
+    fn span(&self) -> Span {
+        self.span()
+    }
 }
 
 impl Type {
     pub fn span(&self) -> Span {
         match self {
+            Type::Primitive(ty) => ty.span(),
             Type::Parenthesized(ty) => ty.span(),
             Type::Path(ty) => ty.span(),
+            Type::Reference(ty) => ty.span(),
+            Type::Slice(ty) => ty.span(),
+            Type::Array(ty) => ty.span(),
             Type::Tuple(ty) => ty.span(),
             Type::Never(ty) => ty.span(),
-            Type::Reference(ty) => ty.span(),
-            Type::Array(ty) => ty.span(),
-            Type::Slice(ty) => ty.span(),
             Type::Inferred(ty) => ty.span(),
             Type::BareFn(ty) => ty.span(),
-            Type::Any(ty) => ty.span(),
         }
     }
 }
 
-impl HasSpan for Type {
+/// 原生类型
+#[derive(Debug, Clone, PartialEq)]
+pub enum Primitive {
+    /// Any
+    Any(TokenSpan),
+    /// Boolean
+    Boolean(TokenSpan),
+    /// Byte
+    Byte(TokenSpan),
+    /// Integer
+    Integer(TokenSpan),
+    /// Float
+    Float(TokenSpan),
+    /// Char
+    Char(TokenSpan),
+    /// String
+    String(TokenSpan),
+}
+
+impl Primitive {
+    pub fn span(&self) -> Span {
+        match self {
+            Primitive::Any(t) => t.span(),
+            Primitive::Boolean(t) => t.span(),
+            Primitive::Byte(t) => t.span(),
+            Primitive::Integer(t) => t.span(),
+            Primitive::Float(t) => t.span(),
+            Primitive::Char(t) => t.span(),
+            Primitive::String(t) => t.span(),
+        }
+    }
+}
+
+impl HasSpan for Primitive {
     fn span(&self) -> Span {
         self.span()
     }
@@ -296,25 +335,6 @@ impl BareFunctionType {
 }
 
 impl HasSpan for BareFunctionType {
-    fn span(&self) -> Span {
-        self.span()
-    }
-}
-
-
-/// 任意类型
-#[derive(Debug)]
-pub struct AnyType {
-    pub any_token: TokenSpan, // any keyword
-}
-
-impl AnyType {
-    pub fn span(&self) -> Span {
-        self.any_token.span()
-    }
-}
-
-impl HasSpan for AnyType {
     fn span(&self) -> Span {
         self.span()
     }

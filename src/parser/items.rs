@@ -4,461 +4,491 @@ use crate::lexical::{
     Brace, Bracket, IdentSpan, Keyword, Literal, LiteralSpan, Paren, Punctuated, Symbol, Token,
     TokenSpan,
 };
-use crate::syntax::items::*;
+use crate::syntax::{Expression, Path, Pattern, Statement, Type, Visibility, items::*};
 
 // Item 相关的 Parse 实现
 impl Parse for Item {
     fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
-        let token = stream.lookahead1()?;
+        let peek = stream.peek().ok_or(ParseError::eof())?;
 
-        match &token.value {
-            Token::Keyword(Keyword::Fn) => Ok(Item::Fn(ItemFn::parse(stream)?)),
-            Token::Keyword(Keyword::Struct) => Ok(Item::Struct(ItemStruct::parse(stream)?)),
-            Token::Keyword(Keyword::Enum) => Ok(Item::Enum(ItemEnum::parse(stream)?)),
-            Token::Keyword(Keyword::Impl) => Ok(Item::Impl(ItemImpl::parse(stream)?)),
-            Token::Keyword(Keyword::Type) => Ok(Item::Type(ItemType::parse(stream)?)),
-            Token::Keyword(Keyword::Use) => Ok(Item::Use(ItemUse::parse(stream)?)),
-            _ => Err(ParseError::new("Expected item")
-                .with_span(token.span)
-                .with_expected("fn, struct, enum, impl, type, or use")),
+        match peek.value() {
+            Token::Keyword(Keyword::Fn) => parse_function(stream).map(Item::Function),
+            Token::Keyword(Keyword::Struct) => parse_struct(stream).map(Item::Struct),
+            Token::Keyword(Keyword::Enum) => parse_enum(stream).map(Item::Enum),
+            Token::Keyword(Keyword::Type) => parse_type_alias(stream).map(Item::TypeAlias),
+            Token::Keyword(Keyword::Const) => parse_const(stream).map(Item::Const),
+            Token::Keyword(Keyword::Static) => parse_static(stream).map(Item::Static),
+            Token::Keyword(Keyword::Mod) => parse_module(stream).map(Item::Module),
+            Token::Keyword(Keyword::Use) => parse_use(stream).map(Item::Use),
+
+            _ => Err(ParseError::new(
+                "expected an item declaration (function, struct, enum, type, const, static, mod, or use)",
+            )),
         }
     }
 }
 
-impl Parse for ItemFn {
-    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
-        let vis = Visibility::parse(stream)?;
-        let sig = Signature::parse(stream)?;
-        let block = Block::parse(stream)?;
-        Ok(ItemFn { vis, sig, block })
-    }
+/// 解析函数定义
+fn parse_function(stream: &mut ParseStream) -> Result<FunctionItem, ParseError> {
+    let fn_token = stream.expect(&Token::Keyword(Keyword::Fn))?;
+    let name = IdentSpan::parse(stream)?;
+
+    // 解析泛型参数
+    let generics = if stream.next_is(Symbol::Lt) {
+        Some(parse_generic_params(stream)?)
+    } else {
+        None
+    };
+
+    // 解析函数参数
+    let params = parse_function_params(stream)?;
+
+    // 解析返回类型
+    let return_type = if stream.next_is(Symbol::RArrow) {
+        let arrow_token = stream.expect_symbol(Symbol::RArrow)?;
+        let return_ty = Box::new(Type::parse(stream)?);
+        Some((arrow_token, return_ty))
+    } else {
+        None
+    };
+
+    // 解析函数体
+    let body = parse_function_body(stream)?;
+
+    Ok(FunctionItem {
+        fn_token,
+        name,
+        generics,
+        params,
+        return_type,
+        body,
+    })
 }
 
-impl Parse for Signature {
-    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
-        let fn_token = stream.expect(&Token::Keyword(Keyword::Fn))?;
-        let name = IdentSpan::parse(stream)?;
-        let open_token = stream.expect_symbol(Symbol::LParen)?;
+/// 解析泛型参数
+fn parse_generic_params(stream: &mut ParseStream) -> Result<GenericParams, ParseError> {
+    let lt_token = stream.expect_symbol(Symbol::Lt)?;
+    let params =
+        stream.parse_punctuated_with(|s| parse_generic_param(s), &Token::Symbol(Symbol::Comma))?;
+    let gt_token = stream.expect_symbol(Symbol::Gt)?;
 
-        let inputs = if stream.next_is_symbol(Symbol::RParen) {
-            Punctuated::new()
-        } else {
-            stream.parse_punctuated(&Token::Symbol(Symbol::Comma))?
-        };
-
-        let close_token = stream.expect_symbol(Symbol::RParen)?;
-
-        let output = RetureType::parse(stream)?;
-
-        Ok(Signature {
-            fn_token,
-            name,
-            paren_token: Paren {
-                open: open_token,
-                close: close_token,
-            },
-            inputs,
-            output,
-        })
-    }
+    Ok(GenericParams {
+        angle_bracket_token: (lt_token, gt_token),
+        params,
+    })
 }
 
-impl Parse for FnArg {
-    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
-        // Try to parse as receiver first
-        if let Ok(receiver) = stream.try_parse(Receiver::parse) {
-            return Ok(FnArg::Receiver(receiver));
-        }
+/// 解析单个泛型参数
+fn parse_generic_param(stream: &mut ParseStream) -> Result<GenericParam, ParseError> {
+    let name = IdentSpan::parse(stream)?;
 
-        // Otherwise parse as typed argument
-        let pat = Pat::parse(stream)?;
+    let bounds = if stream.next_is(Symbol::Colon) {
         let colon_token = stream.expect_symbol(Symbol::Colon)?;
-        let ty = Type::parse(stream)?;
+        let bounds = stream
+            .parse_punctuated_with(|s| parse_type_param_bound(s), &Token::Symbol(Symbol::Plus))?;
+        Some((colon_token, bounds))
+    } else {
+        None
+    };
 
-        Ok(FnArg::Typed(PatType {
-            pat: Box::new(pat),
-            colon_token,
-            ty: Box::new(ty),
-        }))
-    }
+    let default = if stream.next_is(Symbol::Eq) {
+        let eq_token = stream.expect_symbol(Symbol::Eq)?;
+        let default_ty = Box::new(Type::parse(stream)?);
+        Some((eq_token, default_ty))
+    } else {
+        None
+    };
+
+    Ok(GenericParam::Type(TypeParam {
+        name,
+        bounds,
+        default,
+    }))
 }
 
-impl Parse for Receiver {
-    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
-        let token = stream.lookahead1()?;
-
-        // Check for &self or &mut self
-        let and_token = if stream.next_is_symbol(Symbol::And) {
-            Some(stream.expect_symbol(Symbol::And)?)
-        } else {
-            None
-        };
-
-        let self_token = stream.expect(&Token::Keyword(Keyword::SelfValue))?;
-
-        Ok(Receiver {
-            and_token,
-            self_token,
-        })
-    }
+/// 解析类型参数约束
+fn parse_type_param_bound(stream: &mut ParseStream) -> Result<TypeParamBound, ParseError> {
+    let path = Path::parse(stream)?;
+    Ok(TypeParamBound::Trait(TraitBound { path }))
 }
 
-impl Parse for ItemStruct {
-    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
-        let vis = Visibility::parse(stream)?;
+/// 解析函数参数
+fn parse_function_params(stream: &mut ParseStream) -> Result<FunctionParams, ParseError> {
+    let open = stream.expect_symbol(Symbol::LParen)?;
+    let params =
+        stream.parse_punctuated_with(|s| parse_function_param(s), &Token::Symbol(Symbol::Comma))?;
+    let close = stream.expect_symbol(Symbol::RParen)?;
 
-        let struct_token = stream.expect(&Token::Keyword(Keyword::Struct))?;
-        let name = IdentSpan::parse(stream)?;
-
-        // Parse fields
-        let fields = if stream.next_is_symbol(Symbol::LBrace) {
-            Fields::Named(FieldsNamed::parse(stream)?)
-        } else if stream.next_is_symbol(Symbol::LParen) {
-            Fields::Unnamed(FieldsUnnamed::parse(stream)?)
-        } else {
-            Fields::Unit
-        };
-
-        let semi_token = if matches!(fields, Fields::Unit) || matches!(fields, Fields::Unnamed(_)) {
-            Some(stream.expect_symbol(Symbol::Semi)?)
-        } else {
-            None
-        };
-
-        Ok(ItemStruct {
-            vis,
-            struct_token,
-            name,
-            fields,
-            semi_token,
-        })
-    }
+    Ok(FunctionParams {
+        paren_token: Paren::new(open, close),
+        params,
+    })
 }
 
-impl Parse for FieldsNamed {
-    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
-        let open_token = stream.expect_symbol(Symbol::LBrace)?;
-        let named = if stream.next_is_symbol(Symbol::RBrace) {
-            Punctuated::new()
-        } else {
-            stream.parse_punctuated_with(Field::parse_named, &Token::Symbol(Symbol::Comma))?
-        };
-        let close_token = stream.expect_symbol(Symbol::RBrace)?;
+/// 解析单个函数参数
+fn parse_function_param(stream: &mut ParseStream) -> Result<FunctionParam, ParseError> {
+    let pattern = Pattern::parse(stream)?;
+    let colon_token = stream.expect_symbol(Symbol::Colon)?;
+    let param_type = Box::new(Type::parse(stream)?);
 
-        Ok(FieldsNamed {
-            brace_token: Brace {
-                open: open_token,
-                close: close_token,
-            },
-            named,
-        })
-    }
+    Ok(FunctionParam {
+        pattern,
+        type_annotation: (colon_token, param_type),
+    })
 }
 
-impl Parse for FieldsUnnamed {
-    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
-        let open_token = stream.expect_symbol(Symbol::LParen)?;
-        let unnamed = if stream.next_is_symbol(Symbol::RParen) {
-            Punctuated::new()
+/// 解析函数体
+fn parse_function_body(stream: &mut ParseStream) -> Result<FunctionBody, ParseError> {
+    let open = stream.expect_symbol(Symbol::LBrace)?;
+    let mut stmts = Vec::new();
+
+    while !stream.is_empty() && !stream.next_is(Symbol::RBrace) {
+        if let Ok(stmt) = Statement::parse(stream) {
+            stmts.push(stmt);
         } else {
-            stream.parse_punctuated_with(Field::parse_unnamed, &Token::Symbol(Symbol::Comma))?
-        };
-        let close_token = stream.expect_symbol(Symbol::RParen)?;
-
-        Ok(FieldsUnnamed {
-            paren_token: Paren {
-                open: open_token,
-                close: close_token,
-            },
-            unnamed,
-        })
-    }
-}
-
-impl Parse for Field {
-    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
-        if let Ok(field) = stream.try_parse(Field::parse_unnamed) {
-            return Ok(field);
+            break;
         }
-
-        Field::parse_named(stream)
     }
+
+    let close = stream.expect_symbol(Symbol::RBrace)?;
+
+    Ok(FunctionBody {
+        brace_token: Brace::new(open, close),
+        stmts,
+    })
 }
 
-impl Field {
-    fn parse_named(stream: &mut ParseStream) -> Result<Self, ParseError> {
-        let vis = Visibility::parse(stream)?;
-        let name = IdentSpan::parse(stream)?;
-        let colon_token = stream.expect_symbol(Symbol::Colon)?;
-        let ty = Type::parse(stream)?;
+/// 解析结构体定义
+fn parse_struct(stream: &mut ParseStream) -> Result<StructItem, ParseError> {
+    let struct_token = stream.expect(&Token::Keyword(Keyword::Struct))?;
+    let name = IdentSpan::parse(stream)?;
 
-        Ok(Field {
-            vis,
-            name: Some(name),
-            colon_token: Some(colon_token),
-            ty,
-        })
-    }
+    // 解析泛型参数
+    let generics = if stream.next_is(Symbol::Lt) {
+        Some(parse_generic_params(stream)?)
+    } else {
+        None
+    };
 
-    fn parse_unnamed(stream: &mut ParseStream) -> Result<Self, ParseError> {
-        let ty = Type::parse(stream)?;
+    // 解析结构体字段
+    let (fields, semi_token) = if stream.next_is(Symbol::LParen) {
+        // 元组结构体
+        let fields = StructFields::Tuple(parse_tuple_fields(stream)?);
+        let semi_token = stream.expect_symbol(Symbol::Semi)?;
+        (fields, Some(semi_token))
+    } else if stream.next_is(Symbol::LBrace) {
+        // 命名字段结构体
+        let fields = StructFields::Named(parse_named_fields(stream)?);
+        (fields, None)
+    } else {
+        // 单元结构体
+        let semi_token = stream.expect_symbol(Symbol::Semi)?;
+        (StructFields::Unit, Some(semi_token))
+    };
 
-        Ok(Field {
-            vis: Visibility::Inherited,
-            name: None,
-            colon_token: None,
-            ty,
-        })
-    }
+    Ok(StructItem {
+        struct_token,
+        name,
+        generics,
+        fields,
+        semi_token,
+    })
 }
 
-impl Parse for ItemEnum {
-    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
-        let vis = Visibility::parse(stream)?;
+/// 解析命名字段
+fn parse_named_fields(stream: &mut ParseStream) -> Result<NamedFields, ParseError> {
+    let visibility = stream.try_parse(Visibility::parse);
 
-        let enum_token = stream.expect(&Token::Keyword(Keyword::Enum))?;
-        let name = IdentSpan::parse(stream)?;
-        let open_token = stream.expect_symbol(Symbol::LBrace)?;
+    let open = stream.expect_symbol(Symbol::LBrace)?;
+    let fields =
+        stream.parse_punctuated_with(|s| parse_named_field(s), &Token::Symbol(Symbol::Comma))?;
+    let close = stream.expect_symbol(Symbol::RBrace)?;
 
-        let variants = if stream.next_is_symbol(Symbol::RBrace) {
-            Punctuated::new()
-        } else {
-            stream.parse_punctuated(&Token::Symbol(Symbol::Comma))?
-        };
-
-        let close_token = stream.expect_symbol(Symbol::RBrace)?;
-
-        Ok(ItemEnum {
-            vis,
-            enum_token,
-            name,
-            brace_token: Brace {
-                open: open_token,
-                close: close_token,
-            },
-            variants,
-        })
-    }
+    Ok(NamedFields {
+        brace_token: Brace::new(open, close),
+        visibility,
+        fields,
+    })
 }
 
-impl Parse for Variant {
-    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
-        let name = IdentSpan::parse(stream)?;
+/// 解析单个命名字段
+fn parse_named_field(stream: &mut ParseStream) -> Result<NamedField, ParseError> {
+    let name = IdentSpan::parse(stream)?;
+    let colon_token = stream.expect_symbol(Symbol::Colon)?;
+    let ty = Box::new(Type::parse(stream)?);
 
-        // Parse fields if present
-        let fields = if stream.next_is_symbol(Symbol::LBrace) {
-            Fields::Named(FieldsNamed::parse(stream)?)
-        } else if stream.next_is_symbol(Symbol::LParen) {
-            Fields::Unnamed(FieldsUnnamed::parse(stream)?)
-        } else {
-            Fields::Unit
-        };
-
-        // Parse discriminant if present
-        let discriminant = if stream.next_is_symbol(Symbol::Eq) {
-            let eq_token = stream.expect_symbol(Symbol::Eq)?;
-            let expr = Expression::parse(stream)?;
-            Some((eq_token, expr))
-        } else {
-            None
-        };
-
-        Ok(Variant {
-            name,
-            fields,
-            discriminant,
-        })
-    }
+    Ok(NamedField {
+        name,
+        colon_token,
+        ty,
+    })
 }
 
-impl Parse for ItemImpl {
-    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
-        let impl_token = stream.expect(&Token::Keyword(Keyword::Impl))?;
-        let self_ty = Box::new(Type::parse(stream)?);
-        let open_token = stream.expect_symbol(Symbol::LBrace)?;
+/// 解析元组字段
+fn parse_tuple_fields(stream: &mut ParseStream) -> Result<TupleFields, ParseError> {
+    let visibility = stream.try_parse(Visibility::parse);
+
+    let open = stream.expect_symbol(Symbol::LParen)?;
+    let fields =
+        stream.parse_punctuated_with(|s| parse_tuple_field(s), &Token::Symbol(Symbol::Comma))?;
+    let close = stream.expect_symbol(Symbol::RParen)?;
+
+    Ok(TupleFields {
+        paren_token: Paren::new(open, close),
+        visibility,
+        fields,
+    })
+}
+
+/// 解析单个元组字段
+fn parse_tuple_field(stream: &mut ParseStream) -> Result<TupleField, ParseError> {
+    let visibility = stream.try_parse(Visibility::parse);
+
+    let ty = Box::new(Type::parse(stream)?);
+
+    Ok(TupleField { visibility, ty })
+}
+
+/// 解析枚举定义
+fn parse_enum(stream: &mut ParseStream) -> Result<EnumItem, ParseError> {
+    let enum_token = stream.expect(&Token::Keyword(Keyword::Enum))?;
+    let name = IdentSpan::parse(stream)?;
+
+    // 解析泛型参数
+    let generics = if stream.next_is(Symbol::Lt) {
+        Some(parse_generic_params(stream)?)
+    } else {
+        None
+    };
+
+    // 解析枚举变体
+    let open = stream.expect_symbol(Symbol::LBrace)?;
+    let variants =
+        stream.parse_punctuated_with(|s| parse_enum_variant(s), &Token::Symbol(Symbol::Comma))?;
+    let close = stream.expect_symbol(Symbol::RBrace)?;
+
+    Ok(EnumItem {
+        enum_token,
+        name,
+        generics,
+        brace_token: Brace::new(open, close),
+        variants,
+    })
+}
+
+/// 解析枚举变体
+fn parse_enum_variant(stream: &mut ParseStream) -> Result<EnumVariant, ParseError> {
+    let name = IdentSpan::parse(stream)?;
+
+    // 解析变体字段
+    let fields = if stream.next_is(Symbol::LParen) {
+        Some(EnumVariantFields::Tuple(parse_tuple_fields(stream)?))
+    } else if stream.next_is(Symbol::LBrace) {
+        Some(EnumVariantFields::Named(parse_named_fields(stream)?))
+    } else {
+        None
+    };
+
+    // 解析判别式
+    let discriminant = if stream.next_is(Symbol::Eq) {
+        let eq_token = stream.expect_symbol(Symbol::Eq)?;
+        let expr = Box::new(Expression::parse(stream)?);
+        Some((eq_token, expr))
+    } else {
+        None
+    };
+
+    Ok(EnumVariant {
+        name,
+        fields,
+        discriminant,
+    })
+}
+
+/// 解析类型别名
+fn parse_type_alias(stream: &mut ParseStream) -> Result<TypeAliasItem, ParseError> {
+    let type_token = stream.expect(&Token::Keyword(Keyword::Type))?;
+    let name = IdentSpan::parse(stream)?;
+
+    // 解析泛型参数
+    let generics = if stream.next_is(Symbol::Lt) {
+        Some(parse_generic_params(stream)?)
+    } else {
+        None
+    };
+
+    let eq_token = stream.expect_symbol(Symbol::Eq)?;
+    let ty = Box::new(Type::parse(stream)?);
+    let semi_token = stream.expect_symbol(Symbol::Semi)?;
+
+    Ok(TypeAliasItem {
+        type_token,
+        name,
+        generics,
+        eq_token,
+        ty,
+        semi_token,
+    })
+}
+
+/// 解析常量定义
+fn parse_const(stream: &mut ParseStream) -> Result<ConstItem, ParseError> {
+    let const_token = stream.expect(&Token::Keyword(Keyword::Const))?;
+    let name = IdentSpan::parse(stream)?;
+    let colon_token = stream.expect_symbol(Symbol::Colon)?;
+    let ty = Box::new(Type::parse(stream)?);
+    let eq_token = stream.expect_symbol(Symbol::Eq)?;
+    let expr = Box::new(Expression::parse(stream)?);
+    let semi_token = stream.expect_symbol(Symbol::Semi)?;
+
+    Ok(ConstItem {
+        const_token,
+        name,
+        colon_token,
+        ty,
+        eq_token,
+        expr,
+        semi_token,
+    })
+}
+
+/// 解析静态变量定义
+fn parse_static(stream: &mut ParseStream) -> Result<StaticItem, ParseError> {
+    let static_token = stream.expect(&Token::Keyword(Keyword::Static))?;
+    let name = IdentSpan::parse(stream)?;
+    let colon_token = stream.expect_symbol(Symbol::Colon)?;
+    let ty = Box::new(Type::parse(stream)?);
+    let eq_token = stream.expect_symbol(Symbol::Eq)?;
+    let expr = Box::new(Expression::parse(stream)?);
+    let semi_token = stream.expect_symbol(Symbol::Semi)?;
+
+    Ok(StaticItem {
+        static_token,
+        name,
+        colon_token,
+        ty,
+        eq_token,
+        expr,
+        semi_token,
+    })
+}
+
+/// 解析模块定义
+fn parse_module(stream: &mut ParseStream) -> Result<ModuleItem, ParseError> {
+    let mod_token = stream.expect(&Token::Keyword(Keyword::Mod))?;
+    let name = IdentSpan::parse(stream)?;
+
+    let (content, semi_token) = if stream.next_is(Symbol::LBrace) {
+        let open = stream.expect_symbol(Symbol::LBrace)?;
 
         let mut items = Vec::new();
-        while !stream.next_is_symbol(Symbol::RBrace) {
-            items.push(ImplItem::parse(stream)?);
+
+        while !stream.is_empty() && !stream.next_is(Symbol::RBrace) {
+            if let Ok(item) = Item::parse(stream) {
+                items.push(item);
+            } else {
+                break;
+            }
         }
 
-        let close_token = stream.expect_symbol(Symbol::RBrace)?;
+        let close = stream.expect_symbol(Symbol::RBrace)?;
 
-        Ok(ItemImpl {
-            impl_token,
-            trait_: None, // For simplicity, not parsing trait impls like `Trait for Type`
-            self_ty,
-            brace_token: Brace {
-                open: open_token,
-                close: close_token,
-            },
+        let content = Some(ModuleContent {
+            brace_token: Brace::new(open, close),
             items,
-        })
-    }
-}
-
-impl Parse for ImplItem {
-    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
-        let token = stream.lookahead1()?;
-
-        match &token.value {
-            Token::Keyword(Keyword::Fn) => Ok(ImplItem::Fn(ImplItemFn::parse(stream)?)),
-            Token::Keyword(Keyword::Const) => Ok(ImplItem::Const(ImplItemConst::parse(stream)?)),
-            _ => Err(ParseError::new("Expected impl item")
-                .with_span(token.span)
-                .with_expected("fn or const")),
-        }
-    }
-}
-
-impl Parse for ImplItemFn {
-    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
-        let vis = Visibility::parse(stream)?;
-
-        let sig = Signature::parse(stream)?;
-        let block = Block::parse(stream)?;
-        Ok(ImplItemFn { vis, sig, block })
-    }
-}
-
-impl Parse for ImplItemConst {
-    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
-        let const_token = stream.expect(&Token::Keyword(Keyword::Const))?;
-        let name = IdentSpan::parse(stream)?;
-        let colon_token = stream.expect_symbol(Symbol::Colon)?;
-        let ty = Type::parse(stream)?;
-        let eq_token = stream.expect_symbol(Symbol::Eq)?;
-        let expr = Expression::parse(stream)?;
+        });
+        (content, None)
+    } else {
         let semi_token = stream.expect_symbol(Symbol::Semi)?;
+        (None, Some(semi_token))
+    };
 
-        Ok(ImplItemConst {
-            const_token,
-            name,
-            colon_token,
-            ty,
-            eq_token,
-            expr,
-            semi_token,
-        })
-    }
+    Ok(ModuleItem {
+        mod_token,
+        name,
+        content,
+        semi_token,
+    })
 }
 
-impl Parse for ItemType {
-    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
-        let vis = Visibility::parse(stream)?;
+/// 解析导入声明
+fn parse_use(stream: &mut ParseStream) -> Result<UseItem, ParseError> {
+    let use_token = stream.expect(&Token::Keyword(Keyword::Use))?;
+    let tree = parse_use_tree(stream)?;
+    let semi_token = stream.expect_symbol(Symbol::Semi)?;
 
-        let type_token = stream.expect(&Token::Keyword(Keyword::Type))?;
-        let ident = IdentSpan::parse(stream)?;
-        let eq_token = stream.expect_symbol(Symbol::Eq)?;
-        let ty = Type::parse(stream)?;
-        let semi_token = stream.expect_symbol(Symbol::Semi)?;
-
-        Ok(ItemType {
-            vis,
-            type_token,
-            ident,
-            eq_token,
-            ty,
-            semi_token,
-        })
-    }
+    Ok(UseItem {
+        use_token,
+        tree,
+        semi_token,
+    })
 }
 
-impl Parse for ItemUse {
-    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
-        let vis = Visibility::parse(stream)?;
-
-        let use_token = stream.expect(&Token::Keyword(Keyword::Use))?;
-
-        let leading_colon = if stream.next_is_symbol(Symbol::ColonColon) {
-            Some(stream.expect_symbol(Symbol::ColonColon)?)
-        } else {
-            None
-        };
-
-        let tree = UseTree::parse(stream)?;
-        let semi_token = stream.expect_symbol(Symbol::Semi)?;
-
-        Ok(ItemUse {
-            vis,
-            use_token,
-            leading_colon,
-            tree,
-            semi_token,
-        })
-    }
-}
-
-impl Parse for UseTree {
-    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
-        // Try to parse as path
-        if let Ok(path) = stream.try_parse(UsePath::parse) {
-            return Ok(UseTree::Path(path));
-        }
-
-        // Try to parse as group
-        if let Ok(group) = stream.try_parse(UseGroup::parse) {
-            return Ok(UseTree::Group(group));
-        }
-
-        // Try to parse as name
-        if let Ok(name) = stream.try_parse(UseName::parse) {
-            return Ok(UseTree::Name(name));
-        }
-
-        // Try to parse as rename
-        if let Ok(rename) = stream.try_parse(UseRename::parse) {
-            return Ok(UseTree::Rename(rename));
-        }
-
-        // Try to parse as glob
-        if let Ok(glob) = stream.try_parse(UseGlob::parse) {
-            return Ok(UseTree::Glob(glob));
-        }
-
-        let token = stream.lookahead1()?;
-        Err(ParseError::new("Expected use tree")
-            .with_span(token.span)
-            .with_expected("path, group, name, rename, or glob"))
-    }
-}
-
-impl Parse for UsePath {
-    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
-        let name = IdentSpan::parse(stream)?;
-        let colon2_token = stream.expect_symbol(Symbol::ColonColon)?;
-        let tree = UseTree::parse(stream)?;
-        Ok(UsePath {
-            name,
-            colon2_token,
-            tree: Box::new(tree),
-        })
-    }
-}
-
-impl Parse for UseGroup {
-    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
-        let open_token = stream.expect_symbol(Symbol::LBrace)?;
-        let items = if stream.next_is_symbol(Symbol::RBrace) {
-            Punctuated::new()
-        } else {
-            stream.parse_punctuated(&Token::Symbol(Symbol::Comma))?
-        };
-        let close_token = stream.expect_symbol(Symbol::RBrace)?;
-
-        Ok(UseGroup {
-            brace_token: Brace {
-                open: open_token,
-                close: close_token,
-            },
-            items,
-        })
-    }
-}
-
-impl Parse for UseGlob {
-    fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
+/// 解析导入树
+fn parse_use_tree(stream: &mut ParseStream) -> Result<UseTree, ParseError> {
+    // 解析通配符导入 (::*)
+    if stream.next_is(Symbol::Star) {
         let star_token = stream.expect_symbol(Symbol::Star)?;
-        Ok(UseGlob { star_token })
+        return Ok(UseTree::Glob(UseGlobTree {
+            prefix: None,
+            colon_colon: None,
+            star_token,
+        }));
     }
+
+    // 解析路径
+    let path = Path::parse(stream)?;
+
+    // 解析 ::* 或 ::{...}
+    if stream.next_is(Symbol::ColonColon) {
+        let colon_colon = stream.expect_symbol(Symbol::ColonColon)?;
+
+        if stream.next_is(Symbol::Star) {
+            let star_token = stream.expect_symbol(Symbol::Star)?;
+            return Ok(UseTree::Glob(UseGlobTree {
+                prefix: Some(path),
+                colon_colon: Some(colon_colon),
+                star_token,
+            }));
+        }
+
+        if stream.next_is(Symbol::LBrace) {
+            let open = stream.expect_symbol(Symbol::LBrace)?;
+            let items = stream
+                .parse_punctuated_with(|s| parse_use_tree(s), &Token::Symbol(Symbol::Comma))?;
+            let close = stream.expect_symbol(Symbol::RBrace)?;
+            return Ok(UseTree::Group(UseGroupTree {
+                brace_token: Brace::new(open, close),
+                items,
+            }));
+        }
+    }
+
+    // 解析 as 重命名
+    if stream.next_is(Keyword::As) {
+        let as_token = stream.expect(&Token::Keyword(Keyword::As))?;
+        let rename = IdentSpan::parse(stream)?;
+
+        // 从 path 中提取最后一个 ident 作为 name
+        let last_segment = path
+            .segments
+            .last()
+            .ok_or_else(|| ParseError::new("expected at least one segment in path"))?
+            .clone();
+
+        let name = last_segment.ident.clone();
+
+        return Ok(UseTree::Rename(UseRenameTree {
+            name,
+            as_token,
+            rename,
+        }));
+    }
+
+    // 普通路径导入
+    Ok(UseTree::Path(UsePathTree {
+        path,
+        colon_colon: None,
+        tree: None,
+    }))
 }
