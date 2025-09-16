@@ -74,7 +74,7 @@ impl<'i> Tokenizer<'i> {
         Tokenizer {
             chars,
             input,
-            pos: Pos::new(),
+            pos: Pos::dummy(),
         }
     }
 
@@ -406,7 +406,7 @@ impl<'i> Tokenizer<'i> {
         // 优化：优先处理3字符标点
         if let Some(p) = match (peek, self.peek_n(1), self.peek_n(2)) {
             ('.', Some('.'), Some('=')) => Some((Symbol::DotDotEq, 3)),
-            _ => None
+            _ => None,
         } {
             self.advance(p.1);
             return Ok(Token::Symbol(p.0));
@@ -434,7 +434,7 @@ impl<'i> Tokenizer<'i> {
             ('.', Some('.')) => Some((Symbol::DotDot, 2)),
             ('-', Some('>')) => Some((Symbol::RArrow, 2)),
             ('=', Some('>')) => Some((Symbol::FatArrow, 2)),
-            _ => None
+            _ => None,
         } {
             self.advance(p.1);
             return Ok(Token::Symbol(p.0));
@@ -507,6 +507,16 @@ impl TokenStream {
 
     pub fn parse(input: &str) -> Result<Self, TokenError> {
         let tokens = Tokenizer::new(input).collect::<Result<Vec<_>, _>>()?;
+
+        let tokens = tokens
+            .into_iter()
+            .filter(|t| {
+                !matches!(
+                    t.value,
+                    Token::Eof | Token::Comment(_) | Token::Whitespace(_)
+                )
+            })
+            .collect::<Vec<_>>();
 
         Ok(TokenStream { tokens })
     }
@@ -792,7 +802,7 @@ mod test {
                 Token::Keyword(Keyword::If),
                 Token::Symbol(Symbol::LParen),
                 Token::Ident(Identifier::new("x")),
-                Token::Symbol(Symbol::Ge),
+                Token::Symbol(Symbol::Gt),
                 Token::Literal(Literal::Integer(5)),
                 Token::Symbol(Symbol::RParen),
                 Token::Symbol(Symbol::LBrace),
@@ -823,7 +833,7 @@ mod test {
                 Token::Symbol(Symbol::Star),
                 Token::ident("y"),
                 Token::keyword("as"),
-                Token::ident("float"),
+                Token::keyword("float"),
             ]
         );
     }

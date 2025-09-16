@@ -15,7 +15,7 @@ use crate::syntax::{GenericParams, Item};
 /// Statement → EmptyStatement | ItemDeclaration | ExpressionStatement | MacroInvocationSemi
 ///
 /// 参考：https://doc.rust-lang.org/reference/statements.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Statement {
     /// 空语句，仅包含分号
     Empty(EmptyStatement),
@@ -53,7 +53,7 @@ impl HasSpan for Statement {
 /// EmptyStatement → ;
 ///
 /// 参考：https://doc.rust-lang.org/reference/statements.html#expression-statements
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct EmptyStatement {
     pub semi_token: TokenSpan,
 }
@@ -78,7 +78,7 @@ impl HasSpan for EmptyStatement {
 /// - static语句
 ///
 /// 参考：https://doc.rust-lang.org/reference/statements.html#declaration-statements
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum DeclarationStatement {
     /// let语句，用于声明变量
     Let(LetStatement),
@@ -104,7 +104,7 @@ impl HasSpan for DeclarationStatement {
 /// LetStatement → let Pattern TypeAnnotation? Initializer? ;
 ///
 /// 参考：https://doc.rust-lang.org/reference/statements.html#let-statements
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct LetStatement {
     pub let_token: TokenSpan,
     pub pattern: Pattern,
@@ -133,7 +133,7 @@ impl HasSpan for LetStatement {
 ///                     | ExpressionWithBlock
 ///
 /// 参考：https://doc.rust-lang.org/reference/statements.html#expression-statements
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ExpressionStatement {
     /// 表达式后跟分号
     Semi(ExpressionSemiStatement),
@@ -158,7 +158,7 @@ impl HasSpan for ExpressionStatement {
 }
 
 /// 表达式后跟分号的语句
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct ExpressionSemiStatement {
     pub expr: Expression,
     pub semi_token: TokenSpan,

@@ -1,4 +1,4 @@
-use super::{BinOp, Path, Pattern, RangeLimits, Type, UnOp, Statement};
+use super::{BinOp, Path, Pattern, RangeLimits, Statement, Type, UnOp};
 use crate::diagnostic::{HasSpan, Span, Spanned};
 use crate::lexical::{Brace, Bracket, IdentSpan, LiteralSpan, Paren, Punctuated, TokenSpan};
 
@@ -17,40 +17,6 @@ use crate::lexical::{Brace, Bracket, IdentSpan, LiteralSpan, Paren, Punctuated, 
 /// 参考：https://doc.rust-lang.org/reference/expressions.html
 #[derive(Debug)]
 pub enum Expression {
-    /// 无块表达式 (ExpressionWithoutBlock)
-    WithoutBlock(ExpressionWithoutBlock),
-    /// 块表达式 (ExpressionWithBlock)
-    WithBlock(ExpressionWithBlock),
-}
-
-impl Expression {
-    pub fn span(&self) -> Span {
-        match self {
-            Expression::WithoutBlock(expr) => expr.span(),
-            Expression::WithBlock(expr) => expr.span(),
-        }
-    }
-
-    pub fn is_field_expr(&self) -> bool {
-        match self {
-            Expression::WithoutBlock(expr) => match expr {
-                ExpressionWithoutBlock::Field(_) => true,
-                _ => false,
-            },
-            Expression::WithBlock(_) => false,
-        }
-    }
-}
-
-impl HasSpan for Expression {
-    fn span(&self) -> Span {
-        self.span()
-    }
-}
-
-/// 无块表达式 (ExpressionWithoutBlock)
-#[derive(Debug)]
-pub enum ExpressionWithoutBlock {
     /// 字面量表达式 (LiteralExpression)
     Literal(LiteralExpression),
     /// 路径表达式 (PathExpression)
@@ -89,43 +55,6 @@ pub enum ExpressionWithoutBlock {
     Return(ReturnExpression),
     /// 下划线表达式 (UnderscoreExpression)
     Underscore(UnderscoreExpression),
-}
-
-impl ExpressionWithoutBlock {
-    pub fn span(&self) -> Span {
-        match self {
-            ExpressionWithoutBlock::Literal(expr) => expr.span(),
-            ExpressionWithoutBlock::Path(expr) => expr.span(),
-            ExpressionWithoutBlock::Operator(expr) => expr.span(),
-            ExpressionWithoutBlock::Grouped(expr) => expr.span(),
-            ExpressionWithoutBlock::Array(expr) => expr.span(),
-            ExpressionWithoutBlock::Await(expr) => expr.span(),
-            ExpressionWithoutBlock::Index(expr) => expr.span(),
-            ExpressionWithoutBlock::Tuple(expr) => expr.span(),
-            ExpressionWithoutBlock::TupleIndex(expr) => expr.span(),
-            ExpressionWithoutBlock::Struct(expr) => expr.span(),
-            ExpressionWithoutBlock::Call(expr) => expr.span(),
-            ExpressionWithoutBlock::MethodCall(expr) => expr.span(),
-            ExpressionWithoutBlock::Field(expr) => expr.span(),
-            ExpressionWithoutBlock::Closure(expr) => expr.span(),
-            ExpressionWithoutBlock::Continue(expr) => expr.span(),
-            ExpressionWithoutBlock::Break(expr) => expr.span(),
-            ExpressionWithoutBlock::Range(expr) => expr.span(),
-            ExpressionWithoutBlock::Return(expr) => expr.span(),
-            ExpressionWithoutBlock::Underscore(expr) => expr.span(),
-        }
-    }
-}
-
-impl HasSpan for ExpressionWithoutBlock {
-    fn span(&self) -> Span {
-        self.span()
-    }
-}
-
-/// 块表达式 (ExpressionWithBlock)
-#[derive(Debug)]
-pub enum ExpressionWithBlock {
     /// 块表达式 (BlockExpression)
     Block(BlockExpression),
     /// 循环表达式 (LoopExpression)
@@ -142,23 +71,104 @@ pub enum ExpressionWithBlock {
     Async(AsyncBlockExpression),
 }
 
-impl ExpressionWithBlock {
+impl Expression {
     pub fn span(&self) -> Span {
         match self {
-            ExpressionWithBlock::Block(expr) => expr.span(),
-            ExpressionWithBlock::Loop(expr) => expr.span(),
-            ExpressionWithBlock::While(expr) => expr.span(),
-            ExpressionWithBlock::For(expr) => expr.span(),
-            ExpressionWithBlock::If(expr) => expr.span(),
-            ExpressionWithBlock::Match(expr) => expr.span(),
-            ExpressionWithBlock::Async(expr) => expr.span(),
+            Expression::Literal(expr) => expr.span(),
+            Expression::Path(expr) => expr.span(),
+            Expression::Operator(expr) => expr.span(),
+            Expression::Grouped(expr) => expr.span(),
+            Expression::Array(expr) => expr.span(),
+            Expression::Await(expr) => expr.span(),
+            Expression::Index(expr) => expr.span(),
+            Expression::Tuple(expr) => expr.span(),
+            Expression::TupleIndex(expr) => expr.span(),
+            Expression::Struct(expr) => expr.span(),
+            Expression::Call(expr) => expr.span(),
+            Expression::MethodCall(expr) => expr.span(),
+            Expression::Field(expr) => expr.span(),
+            Expression::Closure(expr) => expr.span(),
+            Expression::Continue(expr) => expr.span(),
+            Expression::Break(expr) => expr.span(),
+            Expression::Range(expr) => expr.span(),
+            Expression::Return(expr) => expr.span(),
+            Expression::Underscore(expr) => expr.span(),
+            Expression::Block(expr) => expr.span(),
+            Expression::Loop(expr) => expr.span(),
+            Expression::While(expr) => expr.span(),
+            Expression::For(expr) => expr.span(),
+            Expression::If(expr) => expr.span(),
+            Expression::Match(expr) => expr.span(),
+            Expression::Async(expr) => expr.span(),
         }
+    }
+
+    pub fn is_field_expr(&self) -> bool {
+        matches!(self, Expression::Field(_))
+    }
+
+    pub fn is_with_block(&self) -> bool {
+        matches!(
+            self,
+            Expression::Block(_)
+                | Expression::Loop(_)
+                | Expression::While(_)
+                | Expression::For(_)
+                | Expression::If(_)
+                | Expression::Match(_)
+                | Expression::Async(_)
+        )
     }
 }
 
-impl HasSpan for ExpressionWithBlock {
+impl HasSpan for Expression {
     fn span(&self) -> Span {
         self.span()
+    }
+}
+
+impl PartialEq for Expression {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Expression::Literal(a), Expression::Literal(b)) => a.lit.value() == b.lit.value(),
+            (Expression::Path(a), Expression::Path(b)) => a.path == b.path,
+            (Expression::Underscore(_), Expression::Underscore(_)) => true,
+            (Expression::Grouped(a), Expression::Grouped(b)) => a.expr == b.expr,
+            (Expression::Tuple(a), Expression::Tuple(b)) => a.elems == b.elems,
+            (Expression::Array(a), Expression::Array(b)) => a == b,
+            (Expression::Block(a), Expression::Block(b)) => a.stmts == b.stmts,
+            (Expression::If(a), Expression::If(b)) => {
+                a.cond == b.cond && a.then_branch == b.then_branch && a.else_branch == b.else_branch
+            }
+            (Expression::While(a), Expression::While(b)) => a.cond == b.cond && a.body == b.body,
+            (Expression::Loop(a), Expression::Loop(b)) => a.body == b.body,
+            (Expression::For(a), Expression::For(b)) => {
+                a.pat == b.pat && a.expr == b.expr && a.body == b.body
+            }
+            (Expression::Break(a), Expression::Break(b)) => a.expr == b.expr,
+            (Expression::Continue(_), Expression::Continue(_)) => true,
+            (Expression::Return(a), Expression::Return(b)) => a.expr == b.expr,
+            (Expression::Match(a), Expression::Match(b)) => a.expr == b.expr && a.arms == b.arms,
+            (Expression::Async(a), Expression::Async(b)) => a.block == b.block,
+            (Expression::Closure(a), Expression::Closure(b)) => {
+                a.inputs == b.inputs && a.output == b.output && a.body == b.body
+            }
+            (Expression::Operator(a), Expression::Operator(b)) => a == b,
+            (Expression::Field(a), Expression::Field(b)) => a.expr == b.expr && a.field == b.field,
+            (Expression::MethodCall(a), Expression::MethodCall(b)) => {
+                a.expr == b.expr && a.method == b.method && a.args == b.args
+            }
+            (Expression::Call(a), Expression::Call(b)) => a.expr == b.expr && a.args == b.args,
+            (Expression::Index(a), Expression::Index(b)) => a.expr == b.expr && a.index == b.index,
+            (Expression::Await(a), Expression::Await(b)) => a.expr == b.expr,
+            (Expression::TupleIndex(a), Expression::TupleIndex(b)) => {
+                a.expr == b.expr && a.index == b.index
+            }
+            (Expression::Range(a), Expression::Range(b)) => {
+                a.start == b.start && a.end == b.end && a.limits == b.limits
+            }
+            _ => false,
+        }
     }
 }
 
@@ -168,7 +178,7 @@ impl HasSpan for ExpressionWithBlock {
 /// BlockExpression : { InnerAttribute* Statements? }
 ///
 /// 参考：https://doc.rust-lang.org/reference/expressions/block-expr.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct BlockExpression {
     pub brace_token: Brace,
     pub stmts: Vec<Statement>,
@@ -192,7 +202,7 @@ impl HasSpan for BlockExpression {
 /// LoopExpression : [LoopLabel] loop BlockExpression
 ///
 /// 参考：https://doc.rust-lang.org/reference/expressions/loop-expr.html#infinite-loops
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct LoopExpression {
     pub label: Option<Label>,
     pub loop_token: TokenSpan,
@@ -223,7 +233,7 @@ impl HasSpan for LoopExpression {
 /// PredicateLoopExpression : [LoopLabel] while Expression BlockExpression
 ///
 /// 参考：https://doc.rust-lang.org/reference/expressions/loop-expr.html#predicate-loops
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct WhileLoopExpression {
     pub label: Option<Label>,
     pub while_token: TokenSpan,
@@ -255,7 +265,7 @@ impl HasSpan for WhileLoopExpression {
 /// IteratorLoopExpression : [LoopLabel] for Pattern in Expression BlockExpression
 ///
 /// 参考：https://doc.rust-lang.org/reference/expressions/loop-expr.html#iterator-loops
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct ForLoopExpression {
     pub label: Option<Label>,
     pub for_token: TokenSpan,
@@ -289,7 +299,7 @@ impl HasSpan for ForLoopExpression {
 /// IfExpression : if Expression BlockExpression (else (BlockExpression | IfExpression))?
 ///
 /// 参考：https://doc.rust-lang.org/reference/expressions/if-expr.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct IfExpression {
     pub if_token: TokenSpan,
     pub cond: Box<Expression>,
@@ -321,7 +331,7 @@ impl HasSpan for IfExpression {
 /// MatchExpression : match Expression { InnerAttribute* MatchArms? }
 ///
 /// 参考：https://doc.rust-lang.org/reference/expressions/match-expr.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct MatchExpression {
     pub match_token: TokenSpan,
     pub expr: Box<Expression>,
@@ -346,7 +356,7 @@ impl HasSpan for MatchExpression {
 /// 根据Rust规范文档，else分支可以是块表达式或另一个if表达式
 ///
 /// 参考：https://doc.rust-lang.org/reference/expressions/if-expr.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ElseBranch {
     /// else if分支
     If(Box<IfExpression>),
@@ -380,7 +390,7 @@ impl HasSpan for ElseBranch {
 /// - 惰性布尔：https://doc.rust-lang.org/reference/expressions/operator-expr.html#lazy-boolean-operators
 /// - 类型转换：https://doc.rust-lang.org/reference/expressions/operator-expr.html#type-cast-expressions
 /// - 赋值：https://doc.rust-lang.org/reference/expressions/operator-expr.html#assignment-expressions
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum OperatorExpression {
     /// 引用表达式 & / &mut
     Borrow {
@@ -489,7 +499,7 @@ impl HasSpan for OperatorExpression {
 /// LiteralExpression : CHAR_LITERAL | STRING_LITERAL | RAW_STRING_LITERAL | BYTE_LITERAL | BYTE_STRING_LITERAL | RAW_BYTE_STRING_LITERAL | INTEGER_LITERAL | FLOAT_LITERAL | BOOLEAN_LITERAL
 ///
 /// 参考：https://doc.rust-lang.org/reference/expressions/literal-expr.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct LiteralExpression {
     pub lit: LiteralSpan,
 }
@@ -511,7 +521,7 @@ impl HasSpan for LiteralExpression {
 /// 根据Rust规范文档，路径表达式用于引用项、变量、函数等
 ///
 /// 参考：https://doc.rust-lang.org/reference/expressions/path-expr.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct PathExpression {
     pub path: Path,
 }
@@ -534,7 +544,7 @@ impl HasSpan for PathExpression {
 /// AwaitExpression : Expression . await
 ///
 /// 参考：https://doc.rust-lang.org/reference/expressions/await-expr.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct AwaitExpression {
     pub expr: Box<Expression>,
     pub dot_token: TokenSpan,
@@ -559,7 +569,7 @@ impl HasSpan for AwaitExpression {
 /// StructExpression : PathInExpression { StructExprFields? } | PathInExpression ( TupleFields? ) | PathInExpression
 ///
 /// 参考：https://doc.rust-lang.org/reference/expressions/struct-expr.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct StructExpression {
     pub path: Path,
     pub brace_token: Brace,
@@ -585,10 +595,9 @@ impl HasSpan for StructExpression {
 /// AsyncBlockExpression : async [move] BlockExpression
 ///
 /// 参考：https://doc.rust-lang.org/reference/expressions/block-expr.html#async-blocks
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct AsyncBlockExpression {
     pub async_token: TokenSpan,
-    pub move_token: Option<TokenSpan>,
     pub block: BlockExpression,
 }
 
@@ -610,7 +619,7 @@ impl HasSpan for AsyncBlockExpression {
 /// StructExprField : Identifier | (Identifier | INTEGER_LITERAL) : Expression
 ///
 /// 参考：https://doc.rust-lang.org/reference/expressions/struct-expr.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct FieldInitializer {
     pub member: IdentSpan,
     pub colon_token: Option<TokenSpan>,
@@ -635,7 +644,7 @@ impl HasSpan for FieldInitializer {
 /// LoopLabel : LIFETIME_OR_LABEL :
 ///
 /// 参考：https://doc.rust-lang.org/reference/expressions/loop-expr.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Label {
     pub label: IdentSpan,
     pub colon_token: TokenSpan,
@@ -660,7 +669,7 @@ impl HasSpan for Label {
 /// MatchArmGuard : if Expression
 ///
 /// 参考：https://doc.rust-lang.org/reference/expressions/match-expr.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct MatchArm {
     pub pat: Pattern,
     pub guard: Option<MatchArmGuard>,
@@ -688,7 +697,7 @@ impl HasSpan for MatchArm {
 }
 
 /// match分支守卫
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct MatchArmGuard {
     pub if_token: TokenSpan,
     pub expr: Box<Expression>,
@@ -712,7 +721,7 @@ impl HasSpan for MatchArmGuard {
 /// FieldExpression : Expression . IDENTIFIER
 ///
 /// 参考：https://doc.rust-lang.org/reference/expressions/field-expr.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct FieldExpression {
     pub expr: Box<Expression>,
     pub dot_token: TokenSpan,
@@ -737,7 +746,7 @@ impl HasSpan for FieldExpression {
 /// TupleIndexingExpression : Expression . INTEGER_LITERAL
 ///
 /// 参考：https://doc.rust-lang.org/reference/expressions/tuple-expr.html#tuple-indexing-expressions
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct TupleIndexingExpression {
     pub expr: Box<Expression>,
     pub dot_token: TokenSpan,
@@ -762,7 +771,7 @@ impl HasSpan for TupleIndexingExpression {
 /// CallExpression : Expression ( CallParams? )
 ///
 /// 参考：https://doc.rust-lang.org/reference/expressions/call-expr.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct CallExpression {
     pub expr: Box<Expression>,
     pub paren_token: Paren,
@@ -787,7 +796,7 @@ impl HasSpan for CallExpression {
 /// MethodCallExpression : Expression . PathExprSegment ( CallParams? )
 ///
 /// 参考：https://doc.rust-lang.org/reference/expressions/method-call-expr.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct MethodCallExpression {
     pub expr: Box<Expression>,
     pub dot_token: TokenSpan,
@@ -814,7 +823,7 @@ impl HasSpan for MethodCallExpression {
 /// IndexExpression : Expression [ Expression ]
 ///
 /// 参考：https://doc.rust-lang.org/reference/expressions/array-expr.html#array-and-slice-indexing-expressions
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct IndexExpression {
     pub expr: Box<Expression>,
     pub bracket_token: Bracket,
@@ -839,7 +848,7 @@ impl HasSpan for IndexExpression {
 /// GroupedExpression : ( Expression )
 ///
 /// 参考：https://doc.rust-lang.org/reference/expressions/grouped-expr.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct GroupedExpression {
     pub paren_token: Paren,
     pub expr: Box<Expression>,
@@ -863,7 +872,7 @@ impl HasSpan for GroupedExpression {
 /// ArrayExpression : [ ArrayElements? ]
 ///
 /// 参考：https://doc.rust-lang.org/reference/expressions/array-expr.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ArrayExpression {
     /// 元素列表，如 [1, 2, 3]
     Elements {
@@ -900,7 +909,7 @@ impl HasSpan for ArrayExpression {
 /// TupleExpression : ( TupleElements? )
 ///
 /// 参考：https://doc.rust-lang.org/reference/expressions/tuple-expr.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct TupleExpression {
     pub paren_token: Paren,
     pub elems: Punctuated<Expression>,
@@ -924,7 +933,7 @@ impl HasSpan for TupleExpression {
 /// RangeExpression : RangeExpr | RangeFromExpr | RangeToExpr | RangeFullExpr | RangeInclusiveExpr | RangeToInclusiveExpr
 ///
 /// 参考：https://doc.rust-lang.org/reference/expressions/range-expr.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct RangeExpression {
     pub start: Option<Box<Expression>>,
     pub limits: Spanned<RangeLimits>,
@@ -961,7 +970,7 @@ impl HasSpan for RangeExpression {
 /// ClosureExpression : move? ( || | | ClosureParameters? | ) (-> TypeNoBounds)? Expression
 ///
 /// 参考：https://doc.rust-lang.org/reference/expressions/closure-expr.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct ClosureExpression {
     pub move_token: Option<TokenSpan>,
     pub or_token: (TokenSpan, TokenSpan), // (|, |)
@@ -994,7 +1003,7 @@ impl HasSpan for ClosureExpression {
 /// BreakExpression : break LIFETIME_OR_LABEL? Expression?
 ///
 /// 参考：https://doc.rust-lang.org/reference/expressions/loop-expr.html#break-expressions
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct BreakExpression {
     pub break_token: TokenSpan,
     pub label: Option<IdentSpan>,
@@ -1027,7 +1036,7 @@ impl HasSpan for BreakExpression {
 /// ContinueExpression : continue LIFETIME_OR_LABEL?
 ///
 /// 参考：https://doc.rust-lang.org/reference/expressions/loop-expr.html#continue-expressions
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct ContinueExpression {
     pub continue_token: TokenSpan,
     pub label: Option<IdentSpan>,
@@ -1057,7 +1066,7 @@ impl HasSpan for ContinueExpression {
 /// ReturnExpression : return Expression?
 ///
 /// 参考：https://doc.rust-lang.org/reference/expressions/return-expr.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct ReturnExpression {
     pub return_token: TokenSpan,
     pub expr: Option<Box<Expression>>,
@@ -1086,7 +1095,7 @@ impl HasSpan for ReturnExpression {
 /// 根据Rust规范文档，下划线表达式用于占位符
 ///
 /// 参考：https://doc.rust-lang.org/reference/expressions.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct UnderscoreExpression {
     pub underscore_token: TokenSpan,
 }

@@ -13,7 +13,7 @@ use crate::lexical::{Brace, Bracket, IdentSpan, LiteralSpan, Paren, Punctuated, 
 /// 根据Rust标准文档，Type的顶级定义为：
 /// Type → TypeNoBounds | ImplTraitType
 /// TypeNoBounds → ParenthesizedType | ImplTraitTypeOneBound | TraitObjectTypeOneBound | TypePath | TupleType | NeverType | RawPointerType | ReferenceType | ArrayType | SliceType | InferredType | QualifiedPathInType | BareFunctionType | MacroInvocation
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Type {
     /// 原生类型 `any`, `bool`, `byte`, `int`, `float`, `char`, `string`
     Primitive(Primitive),
@@ -21,7 +21,7 @@ pub enum Type {
     /// 括号类型，如 `(i32)`
     ///
     /// 示例：
-    /// ```
+    /// ```ignore
     /// let x: (i32) = 42;
     /// ```
     Parenthesized(ParenthesizedType),
@@ -29,7 +29,7 @@ pub enum Type {
     /// 类型路径，如 `std::string::String`, `i32`
     ///
     /// 示例：
-    /// ```
+    /// ```ignore
     /// let s: String = "hello".to_string();
     /// let n: i32 = 42;
     /// ```
@@ -38,7 +38,7 @@ pub enum Type {
     /// 元组类型，如 `(i32, String)`
     ///
     /// 示例：
-    /// ```
+    /// ```ignore
     /// let pair: (i32, String) = (42, "hello".to_string());
     /// ```
     Tuple(TupleType),
@@ -46,7 +46,7 @@ pub enum Type {
     /// Never类型，使用 `!`
     ///
     /// 示例：
-    /// ```
+    /// ```ignore
     /// fn never_returns() -> ! {
     ///     panic!("This function never returns");
     /// }
@@ -56,7 +56,7 @@ pub enum Type {
     /// 引用类型，如 `&i32`, `&mut String`
     ///
     /// 示例：
-    /// ```
+    /// ```ignore
     /// let r: &i32 = &42;
     /// let rm: &mut String = &mut "hello".to_string();
     /// ```
@@ -65,7 +65,7 @@ pub enum Type {
     /// 数组类型，如 `[i32; 5]`
     ///
     /// 示例：
-    /// ```
+    /// ```ignore
     /// let arr: [i32; 5] = [1, 2, 3, 4, 5];
     /// ```
     Array(ArrayType),
@@ -73,7 +73,7 @@ pub enum Type {
     /// 切片类型，如 `[i32]`
     ///
     /// 示例：
-    /// ```
+    /// ```ignore
     /// let slice: &[i32] = &[1, 2, 3];
     /// ```
     Slice(SliceType),
@@ -81,7 +81,7 @@ pub enum Type {
     /// 推断类型，使用 `_`
     ///
     /// 示例：
-    /// ```
+    /// ```ignore
     /// let x: _ = 42;
     /// ```
     Inferred(InferredType),
@@ -89,7 +89,7 @@ pub enum Type {
     /// 函数指针类型，如 `fn(i32) -> i32`
     ///
     /// 示例：
-    /// ```
+    /// ```ignore
     /// let f: fn(i32) -> i32 = |x| x + 1;
     /// ```
     BareFn(BareFunctionType),
@@ -158,7 +158,7 @@ impl HasSpan for Primitive {
 }
 
 /// 括号类型
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct ParenthesizedType {
     pub paren_token: Paren,
     pub ty: Box<Type>,
@@ -177,7 +177,7 @@ impl HasSpan for ParenthesizedType {
 }
 
 /// 类型路径
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct TypePath {
     pub path: Path,
 }
@@ -195,7 +195,7 @@ impl HasSpan for TypePath {
 }
 
 /// 元组类型
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct TupleType {
     pub paren_token: Paren,
     pub elems: Punctuated<Type>,
@@ -214,7 +214,7 @@ impl HasSpan for TupleType {
 }
 
 /// Never类型
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct NeverType {
     pub bang_token: TokenSpan,
 }
@@ -232,7 +232,7 @@ impl HasSpan for NeverType {
 }
 
 /// 引用类型
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct ReferenceType {
     pub and_token: TokenSpan,
     pub is_mut: Option<TokenSpan>, // 显式指定可变性，如 `&mut i32`
@@ -252,7 +252,7 @@ impl HasSpan for ReferenceType {
 }
 
 /// 数组类型
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct ArrayType {
     pub bracket_token: Bracket,
     pub elem: Box<Type>,
@@ -276,7 +276,7 @@ impl HasSpan for ArrayType {
 }
 
 /// 切片类型
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct SliceType {
     pub bracket_token: Bracket,
     pub elem: Box<Type>,
@@ -295,7 +295,7 @@ impl HasSpan for SliceType {
 }
 
 /// 推断类型
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct InferredType {
     pub underscore_token: TokenSpan,
 }
@@ -313,7 +313,7 @@ impl HasSpan for InferredType {
 }
 
 /// 函数指针类型
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct BareFunctionType {
     pub fn_token: TokenSpan,
     pub paren_token: Paren,

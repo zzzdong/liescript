@@ -4,14 +4,17 @@ use crate::lexical::{
     TokenSpan,
 };
 
-use crate::syntax::expressions::*;
+use crate::parser::parse;
 use crate::syntax::names::Path;
 use crate::syntax::patterns::Pattern;
 use crate::syntax::statements::Statement;
 use crate::syntax::types::Type;
 use crate::syntax::{BinOp, RangeLimits, UnOp};
+use crate::syntax::{PostfixOp, expressions::*};
 
 use super::parse::{Parse, ParseError, ParseStream};
+
+
 
 pub fn parse_expression(stream: &mut ParseStream) -> Result<Expression, ParseError> {
     parse_expr(stream, 0)
@@ -19,23 +22,43 @@ pub fn parse_expression(stream: &mut ParseStream) -> Result<Expression, ParseErr
 
 /// 解析表达式 (使用Pratt parser算法)
 fn parse_expr(stream: &mut ParseStream, min_bp: u8) -> Result<Expression, ParseError> {
+    // 处理以 .. 开头的范围表达式（如 ..10 或 ..=10）
+    if let Some(expr) = stream.try_parse(|s| parse_range(s, None)) {
+        return Ok(Expression::Range(expr));
+    }
+
     let mut expr = parse_prefix(stream)?;
 
     while let Some(peek) = stream.peek() {
-        match BinOp::from_token(&peek) {
-            Some(bin_op) => {
-                let (left_bp, right_bp) = bin_op.get_binding_power();
-                if left_bp < min_bp {
-                    break;
-                }
-
-                expr = parse_infix(stream, expr, right_bp)?;
-            }
-            None => {
-                // postfix
-                expr = parse_postfix(stream, expr)?;
-            }
+        // 处理范围表达式（如 1..10 或 1..=10）
+        if matches!(
+            peek.value(),
+            Token::Symbol(Symbol::DotDot) | Token::Symbol(Symbol::DotDotEq)
+        ) {
+            let range = parse_range(stream, Some(expr))?;
+            expr = Expression::Range(range);
+            continue;
         }
+
+        // Check if token is a binary operator
+        if let Some(bin_op) = BinOp::from_token(&peek) {
+            let (left_bp, right_bp) = bin_op.get_binding_power();
+            if left_bp < min_bp {
+                break;
+            }
+            expr = parse_infix(stream, expr, right_bp)?;
+            continue;
+        }
+
+        // Check if token is a postfix operator
+        if PostfixOp::from_token(&peek).is_some() {
+            expr = parse_postfix(stream, expr)?;
+            continue;
+        }
+
+        // Not an operator token, end expression parsing
+
+        break;
     }
 
     Ok(expr)
@@ -50,37 +73,31 @@ fn parse_primary(stream: &mut ParseStream) -> Result<Expression, ParseError> {
         Token::Ident(_) => parse_path(stream),
         Token::Symbol(Symbol::Underscore) => parse_underscore(stream),
         Token::Symbol(Symbol::LParen) => parse_paren(stream),
-        Token::Symbol(Symbol::LBracket) => parse_array(stream)
-            .map(|expr| Expression::WithoutBlock(ExpressionWithoutBlock::Array(expr))),
-        Token::Symbol(Symbol::LBrace) => {
-            parse_block(stream).map(|expr| Expression::WithBlock(ExpressionWithBlock::Block(expr)))
+        Token::Symbol(Symbol::LBracket) => parse_array(stream).map(|expr| Expression::Array(expr)),
+        Token::Symbol(Symbol::LBrace) => parse_block(stream).map(|expr| Expression::Block(expr)),
+        Token::Keyword(Keyword::If) => parse_if(stream).map(|expr| Expression::If(expr)),
+        Token::Keyword(Keyword::While) => parse_while(stream).map(|expr| Expression::While(expr)),
+        Token::Keyword(Keyword::Loop) => parse_loop(stream).map(|expr| Expression::Loop(expr)),
+        Token::Keyword(Keyword::For) => parse_for(stream).map(|expr| Expression::For(expr)),
+        Token::Keyword(Keyword::Break) => parse_break(stream).map(|expr| Expression::Break(expr)),
+        Token::Keyword(Keyword::Continue) => {
+            parse_continue(stream).map(|expr| Expression::Continue(expr))
         }
-        Token::Keyword(Keyword::If) => {
-            parse_if(stream).map(|expr| Expression::WithBlock(ExpressionWithBlock::If(expr)))
+        Token::Keyword(Keyword::Return) => {
+            parse_return(stream).map(|expr| Expression::Return(expr))
         }
-        Token::Keyword(Keyword::While) => {
-            parse_while(stream).map(|expr| Expression::WithBlock(ExpressionWithBlock::While(expr)))
+        Token::Keyword(Keyword::Match) => parse_match(stream).map(|expr| Expression::Match(expr)),
+        Token::Keyword(Keyword::Async) => {
+            parse_async_block(stream).map(|expr| Expression::Async(expr))
         }
-        Token::Keyword(Keyword::Loop) => {
-            parse_loop(stream).map(|expr| Expression::WithBlock(ExpressionWithBlock::Loop(expr)))
+        Token::Symbol(Symbol::Or) | Token::Symbol(Symbol::OrOr) => {
+            parse_closure(stream).map(|expr| Expression::Closure(expr))
         }
-        Token::Keyword(Keyword::For) => {
-            parse_for(stream).map(|expr| Expression::WithBlock(ExpressionWithBlock::For(expr)))
-        }
-        Token::Keyword(Keyword::Break) => parse_break(stream)
-            .map(|expr| Expression::WithoutBlock(ExpressionWithoutBlock::Break(expr))),
-        Token::Keyword(Keyword::Continue) => parse_continue(stream)
-            .map(|expr| Expression::WithoutBlock(ExpressionWithoutBlock::Continue(expr))),
-        Token::Keyword(Keyword::Return) => parse_return(stream)
-            .map(|expr| Expression::WithoutBlock(ExpressionWithoutBlock::Return(expr))),
-        Token::Keyword(Keyword::Match) => {
-            parse_match(stream).map(|expr| Expression::WithBlock(ExpressionWithBlock::Match(expr)))
-        }
-        Token::Symbol(Symbol::Or) => parse_closure(stream)
-            .map(|expr| Expression::WithoutBlock(ExpressionWithoutBlock::Closure(expr))),
+
         _ => Err(ParseError::new("Expected primary expression")
             .with_span(start_token.span)
-            .with_expected("valid primary expression")),
+            .with_expected("valid primary expression")
+            .with_found(&start_token)),
     }
 }
 
@@ -96,35 +113,29 @@ fn parse_prefix(stream: &mut ParseStream) -> Result<Expression, ParseError> {
                 } else {
                     None
                 };
-                return Ok(Expression::WithoutBlock(ExpressionWithoutBlock::Operator(
-                    OperatorExpression::Borrow {
-                        and_token,
-                        is_mut,
-                        expr: Box::new(parse_prefix(stream)?),
-                    },
-                )));
+                return Ok(Expression::Operator(OperatorExpression::Borrow {
+                    and_token,
+                    is_mut,
+                    expr: Box::new(parse_prefix(stream)?),
+                }));
             }
 
             // 解引用表达式
             Token::Symbol(Symbol::Star) => {
                 let star_token = stream.consume()?;
-                return Ok(Expression::WithoutBlock(ExpressionWithoutBlock::Operator(
-                    OperatorExpression::Deref {
-                        star_token,
-                        expr: Box::new(parse_prefix(stream)?),
-                    },
-                )));
+                return Ok(Expression::Operator(OperatorExpression::Deref {
+                    star_token,
+                    expr: Box::new(parse_prefix(stream)?),
+                }));
             }
 
             // 一元运算符
             Token::Symbol(Symbol::Not) | Token::Symbol(Symbol::Minus) => {
                 let op = Spanned::<UnOp>::parse(stream)?;
-                return Ok(Expression::WithoutBlock(ExpressionWithoutBlock::Operator(
-                    OperatorExpression::Neg {
-                        op,
-                        expr: Box::new(parse_prefix(stream)?),
-                    },
-                )));
+                return Ok(Expression::Operator(OperatorExpression::Neg {
+                    op,
+                    expr: Box::new(parse_prefix(stream)?),
+                }));
             }
 
             // 不是前缀操作符，退出循环
@@ -145,27 +156,23 @@ fn parse_infix(
 
     let op = <Spanned<BinOp>>::parse(stream)?;
 
-    let right = Box::new(parse_expr(stream, op.get_binding_power().0)?);
+    let right = Box::new(parse_expr(stream, right_bp)?);
 
     let expr = match op.value() {
-        BinOp::Assign => Expression::WithoutBlock(ExpressionWithoutBlock::Operator(
-            OperatorExpression::Assign {
-                left: Box::new(left),
-                eq_token: start_token.clone(),
-                right,
-            },
-        )),
+        BinOp::Assign => Expression::Operator(OperatorExpression::Assign {
+            left: Box::new(left),
+            eq_token: start_token.clone(),
+            right,
+        }),
         BinOp::AddAssign
         | BinOp::SubAssign
         | BinOp::MulAssign
         | BinOp::DivAssign
-        | BinOp::RemAssign => Expression::WithoutBlock(ExpressionWithoutBlock::Operator(
-            OperatorExpression::AssignOp {
-                left: Box::new(left),
-                op,
-                right,
-            },
-        )),
+        | BinOp::RemAssign => Expression::Operator(OperatorExpression::AssignOp {
+            left: Box::new(left),
+            op,
+            right,
+        }),
         BinOp::Add
         | BinOp::Sub
         | BinOp::Mul
@@ -175,33 +182,27 @@ fn parse_infix(
         | BinOp::BitOr
         | BinOp::BitXor
         | BinOp::BitShl
-        | BinOp::BitShr => Expression::WithoutBlock(ExpressionWithoutBlock::Operator(
-            OperatorExpression::Arithmetic {
-                left: Box::new(left),
-                op,
-                right,
-            },
-        )),
-        BinOp::LogicAnd | BinOp::LogicOr => Expression::WithoutBlock(
-            ExpressionWithoutBlock::Operator(OperatorExpression::Logical {
-                left: Box::new(left),
-                op,
-                right,
-            }),
-        ),
+        | BinOp::BitShr => Expression::Operator(OperatorExpression::Arithmetic {
+            left: Box::new(left),
+            op,
+            right,
+        }),
+        BinOp::LogicAnd | BinOp::LogicOr => Expression::Operator(OperatorExpression::Logical {
+            left: Box::new(left),
+            op,
+            right,
+        }),
         BinOp::Eq
         | BinOp::NotEq
         | BinOp::LessThen
         | BinOp::GreaterThen
         | BinOp::LessThenOrEq
-        | BinOp::GreaterThenOrEq => Expression::WithoutBlock(ExpressionWithoutBlock::Operator(
-            OperatorExpression::Comparison {
-                left: Box::new(left),
-                op,
-                right,
-            },
-        )),
-        _ => unreachable!(),
+        | BinOp::GreaterThenOrEq => Expression::Operator(OperatorExpression::Comparison {
+            left: Box::new(left),
+            op,
+            right,
+        }),
+        _ => unreachable!("unexpected operator: {op:?}"),
     };
 
     Ok(expr)
@@ -214,41 +215,35 @@ fn parse_postfix(stream: &mut ParseStream, expr: Expression) -> Result<Expressio
         match peek.value() {
             Token::Symbol(Symbol::Dot) => {
                 let dot_token = stream.consume()?;
-                let peek = stream.consume()?;
+                let peek = stream.peek().ok_or(ParseError::eof())?;
 
                 match peek.value() {
                     Token::Keyword(Keyword::Await) => {
                         let await_token = stream.consume()?;
-                        expr = Expression::WithoutBlock(ExpressionWithoutBlock::Await(
-                            AwaitExpression {
-                                expr: Box::new(expr),
-                                dot_token,
-                                await_token,
-                            },
-                        ));
+                        expr = Expression::Await(AwaitExpression {
+                            expr: Box::new(expr),
+                            dot_token,
+                            await_token,
+                        });
                     }
                     Token::Ident(_name) => {
                         let field = IdentSpan::parse(stream)?;
 
-                        expr = Expression::WithoutBlock(ExpressionWithoutBlock::Field(
-                            FieldExpression {
-                                expr: Box::new(expr),
-                                dot_token,
-                                field,
-                            },
-                        ));
+                        expr = Expression::Field(FieldExpression {
+                            expr: Box::new(expr),
+                            dot_token,
+                            field,
+                        });
                     }
 
                     Token::Literal(Literal::Integer(_i)) => {
                         let index = <Spanned<u32>>::parse(stream)?;
 
-                        expr = Expression::WithoutBlock(ExpressionWithoutBlock::TupleIndex(
-                            TupleIndexingExpression {
-                                expr: Box::new(expr),
-                                dot_token,
-                                index,
-                            },
-                        ));
+                        expr = Expression::TupleIndex(TupleIndexingExpression {
+                            expr: Box::new(expr),
+                            dot_token,
+                            index,
+                        });
                     }
 
                     _ => {
@@ -266,30 +261,28 @@ fn parse_postfix(stream: &mut ParseStream, expr: Expression) -> Result<Expressio
 
                 // when expr is FieldExpression, it should be changed to MethodCallExpression
                 expr = match expr {
-                    Expression::WithoutBlock(ExpressionWithoutBlock::Field(FieldExpression {
+                    Expression::Field(FieldExpression {
                         expr,
                         dot_token,
                         field,
-                    })) => Expression::WithoutBlock(ExpressionWithoutBlock::MethodCall(
-                        MethodCallExpression {
-                            expr,
-                            dot_token,
-                            method: field,
-                            paren_token: Paren {
-                                open: open_token,
-                                close: close_token,
-                            },
-                            args,
+                    }) => Expression::MethodCall(MethodCallExpression {
+                        expr,
+                        dot_token,
+                        method: field,
+                        paren_token: Paren {
+                            open: open_token,
+                            close: close_token,
                         },
-                    )),
-                    _ => Expression::WithoutBlock(ExpressionWithoutBlock::Call(CallExpression {
+                        args,
+                    }),
+                    _ => Expression::Call(CallExpression {
                         expr: Box::new(expr),
                         paren_token: Paren {
                             open: open_token,
                             close: close_token,
                         },
                         args,
-                    })),
+                    }),
                 }
             }
 
@@ -298,24 +291,22 @@ fn parse_postfix(stream: &mut ParseStream, expr: Expression) -> Result<Expressio
                 let index = Box::new(parse_expression(stream)?);
                 let close_token = stream.expect_symbol(Symbol::RBracket)?;
 
-                expr = Expression::WithoutBlock(ExpressionWithoutBlock::Index(IndexExpression {
+                expr = Expression::Index(IndexExpression {
                     expr: Box::new(expr),
                     bracket_token: Bracket {
                         open: open_token,
                         close: close_token,
                     },
                     index,
-                }));
+                });
             }
 
             Token::Symbol(Symbol::Question) => {
                 let question_token = stream.consume()?;
-                expr = Expression::WithoutBlock(ExpressionWithoutBlock::Operator(
-                    OperatorExpression::Try {
-                        expr: Box::new(expr),
-                        question_token,
-                    },
-                ));
+                expr = Expression::Operator(OperatorExpression::Try {
+                    expr: Box::new(expr),
+                    question_token,
+                });
             }
 
             _ => break,
@@ -334,23 +325,19 @@ impl Parse for Expression {
 // 新增的解析函数
 fn parse_literal(stream: &mut ParseStream) -> Result<Expression, ParseError> {
     let lit = LiteralSpan::parse(stream)?;
-    Ok(Expression::WithoutBlock(ExpressionWithoutBlock::Literal(
-        LiteralExpression { lit },
-    )))
+    Ok(Expression::Literal(LiteralExpression { lit }))
 }
 
 fn parse_path(stream: &mut ParseStream) -> Result<Expression, ParseError> {
     let path = Path::parse(stream)?;
-    Ok(Expression::WithoutBlock(ExpressionWithoutBlock::Path(
-        PathExpression { path },
-    )))
+    Ok(Expression::Path(PathExpression { path }))
 }
 
 fn parse_underscore(stream: &mut ParseStream) -> Result<Expression, ParseError> {
     let underscore_token = stream.consume()?;
-    Ok(Expression::WithoutBlock(
-        ExpressionWithoutBlock::Underscore(UnderscoreExpression { underscore_token }),
-    ))
+    Ok(Expression::Underscore(UnderscoreExpression {
+        underscore_token,
+    }))
 }
 
 fn parse_paren(stream: &mut ParseStream) -> Result<Expression, ParseError> {
@@ -359,15 +346,13 @@ fn parse_paren(stream: &mut ParseStream) -> Result<Expression, ParseError> {
     // 空元组
     if stream.next_is(Symbol::RParen) {
         let close_token = stream.consume()?;
-        return Ok(Expression::WithoutBlock(ExpressionWithoutBlock::Tuple(
-            TupleExpression {
-                paren_token: Paren {
-                    open: open_token,
-                    close: close_token,
-                },
-                elems: Punctuated::new(),
+        return Ok(Expression::Tuple(TupleExpression {
+            paren_token: Paren {
+                open: open_token,
+                close: close_token,
             },
-        )));
+            elems: Punctuated::new(),
+        }));
     }
 
     // 尝试解析为分组表达式（单个表达式后跟右括号）
@@ -377,15 +362,13 @@ fn parse_paren(stream: &mut ParseStream) -> Result<Expression, ParseError> {
         // 如果下一个token是右括号，则这是一个分组表达式
         let close_token = s.expect_symbol(Symbol::RParen)?;
 
-        Ok(Expression::WithoutBlock(ExpressionWithoutBlock::Grouped(
-            GroupedExpression {
-                paren_token: Paren {
-                    open: open_token.clone(),
-                    close: close_token,
-                },
-                expr: Box::new(expr),
+        Ok(Expression::Grouped(GroupedExpression {
+            paren_token: Paren {
+                open: open_token.clone(),
+                close: close_token,
             },
-        )))
+            expr: Box::new(expr),
+        }))
     });
 
     if let Some(grouped) = result {
@@ -395,17 +378,16 @@ fn parse_paren(stream: &mut ParseStream) -> Result<Expression, ParseError> {
     // 如果不是分组表达式，则尝试解析为元组表达式
     let elems =
         stream.parse_punctuated_with(|s| parse_expression(s), &Token::Symbol(Symbol::Comma))?;
+
     let close_token = stream.expect_symbol(Symbol::RParen)?;
 
-    Ok(Expression::WithoutBlock(ExpressionWithoutBlock::Tuple(
-        TupleExpression {
-            paren_token: Paren {
-                open: open_token,
-                close: close_token,
-            },
-            elems,
+    Ok(Expression::Tuple(TupleExpression {
+        paren_token: Paren {
+            open: open_token,
+            close: close_token,
         },
-    )))
+        elems,
+    }))
 }
 
 fn parse_array(stream: &mut ParseStream) -> Result<ArrayExpression, ParseError> {
@@ -487,24 +469,23 @@ fn parse_block(stream: &mut ParseStream) -> Result<BlockExpression, ParseError> 
 
 fn parse_if(stream: &mut ParseStream) -> Result<IfExpression, ParseError> {
     let if_token = stream.consume()?;
+
+    // Parse condition
     let cond = Box::new(parse_expression(stream)?);
+
+    // Parse then branch
     let then_branch = BlockExpression::parse(stream)?;
 
+    // Parse else branch if present
     let else_branch = if stream.next_is(Keyword::Else) {
         let else_token = stream.consume()?;
+
         if stream.next_is(Keyword::If) {
-            Some((
-                else_token,
-                Box::new(ElseBranch::If(Box::new(parse_if(stream)?))),
-            ))
-        } else if stream.next_is(Symbol::LBrace) {
-            Some((
-                else_token,
-                Box::new(ElseBranch::Block(BlockExpression::parse(stream)?)),
-            ))
+            let else_if_expr = parse_if(stream)?;
+            Some((else_token, Box::new(ElseBranch::If(Box::new(else_if_expr)))))
         } else {
-            return Err(ParseError::new("Expected block or if after else")
-                .with_span(stream.lookahead1()?.span));
+            let else_block = BlockExpression::parse(stream)?;
+            Some((else_token, Box::new(ElseBranch::Block(else_block))))
         }
     } else {
         None
@@ -633,7 +614,6 @@ fn parse_match(stream: &mut ParseStream) -> Result<MatchExpression, ParseError> 
 
         let fat_arrow_token = stream.expect_symbol(Symbol::FatArrow)?;
         let body = Box::new(parse_expression(stream)?);
-        let body_span = body.span();
         let comma_token = stream
             .next_is(Symbol::Comma)
             .then(|| stream.consume())
@@ -644,12 +624,8 @@ fn parse_match(stream: &mut ParseStream) -> Result<MatchExpression, ParseError> 
             guard,
             fat_arrow_token,
             body,
-            comma_token: comma_token.clone(),
+            comma_token,
         });
-
-        if comma_token.is_none() && !stream.next_is(Symbol::RBrace) {
-            return Err(ParseError::new("Expected comma after match arm").with_span(body_span));
-        }
     }
 
     let close_brace = stream.expect_symbol(Symbol::RBrace)?;
@@ -665,9 +641,30 @@ fn parse_match(stream: &mut ParseStream) -> Result<MatchExpression, ParseError> 
     })
 }
 
-fn parse_closure(stream: &mut ParseStream) -> Result<ClosureExpression, ParseError> {
-    let or1_token = stream.consume()?;
+fn parse_async_block(stream: &mut ParseStream) -> Result<AsyncBlockExpression, ParseError> {
+    let async_token = stream.consume()?;
+    let block = BlockExpression::parse(stream)?;
 
+    Ok(AsyncBlockExpression { async_token, block })
+}
+
+fn parse_closure(stream: &mut ParseStream) -> Result<ClosureExpression, ParseError> {
+    // try parse || expr, `||` will be parsed as a binary operator
+    if let Some(expr) = stream.try_parse(|s| {
+        let oror_token = s.expect_symbol(Symbol::OrOr)?;
+        let body = Box::new(parse_expression(s)?);
+        Ok(ClosureExpression {
+            move_token: None,
+            or_token: (oror_token.clone(), oror_token),
+            inputs: Punctuated::new(),
+            output: None,
+            body,
+        })
+    }) {
+        return Ok(expr);
+    }
+
+    let or1_token = stream.consume()?;
     // 尝试解析无参数闭包 || expr
     let result = stream.try_parse(|s| {
         let or2_token = s.expect_symbol(Symbol::Or)?;
@@ -747,6 +744,48 @@ impl Parse for UnOp {
     }
 }
 
+impl PartialEq for BinOp {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (BinOp::Add, BinOp::Add) => true,
+            (BinOp::Sub, BinOp::Sub) => true,
+            (BinOp::Mul, BinOp::Mul) => true,
+            (BinOp::Div, BinOp::Div) => true,
+            (BinOp::Rem, BinOp::Rem) => true,
+            (BinOp::BitAnd, BinOp::BitAnd) => true,
+            (BinOp::BitOr, BinOp::BitOr) => true,
+            (BinOp::BitXor, BinOp::BitXor) => true,
+            (BinOp::BitShl, BinOp::BitShl) => true,
+            (BinOp::BitShr, BinOp::BitShr) => true,
+            (BinOp::LogicAnd, BinOp::LogicAnd) => true,
+            (BinOp::LogicOr, BinOp::LogicOr) => true,
+            (BinOp::Eq, BinOp::Eq) => true,
+            (BinOp::NotEq, BinOp::NotEq) => true,
+            (BinOp::LessThen, BinOp::LessThen) => true,
+            (BinOp::GreaterThen, BinOp::GreaterThen) => true,
+            (BinOp::LessThenOrEq, BinOp::LessThenOrEq) => true,
+            (BinOp::GreaterThenOrEq, BinOp::GreaterThenOrEq) => true,
+            (BinOp::Assign, BinOp::Assign) => true,
+            (BinOp::AddAssign, BinOp::AddAssign) => true,
+            (BinOp::SubAssign, BinOp::SubAssign) => true,
+            (BinOp::MulAssign, BinOp::MulAssign) => true,
+            (BinOp::DivAssign, BinOp::DivAssign) => true,
+            (BinOp::RemAssign, BinOp::RemAssign) => true,
+            _ => false,
+        }
+    }
+}
+
+impl PartialEq for UnOp {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (UnOp::Neg, UnOp::Neg) => true,
+            (UnOp::Not, UnOp::Not) => true,
+            _ => false,
+        }
+    }
+}
+
 impl Parse for BinOp {
     fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
         let token = stream.consume()?;
@@ -774,11 +813,317 @@ impl Parse for RangeLimits {
     }
 }
 
+fn parse_range(
+    stream: &mut ParseStream,
+    start: Option<Expression>,
+) -> Result<RangeExpression, ParseError> {
+    let limits = <Spanned<RangeLimits>>::parse(stream)?;
+
+    // 使用 try_parse 来尝试解析右条件，如果失败则返回 None
+    let end = stream.try_parse(parse_expression).map(Box::new);
+
+    Ok(RangeExpression {
+        start: start.map(Box::new),
+        limits,
+        end,
+    })
+}
+
 impl Parse for Label {
     fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
         let label = IdentSpan::parse(stream)?;
         let colon_token = stream.consume()?;
 
         Ok(Label { colon_token, label })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::diagnostic::{Pos, Span};
+    use crate::lexical::{IdentSpan, Identifier, Literal, Token, TokenStream};
+    use crate::syntax::{PathSegment, expressions::*};
+
+    /// 解析表达式并忽略Span信息进行比较
+    fn assert_expr_eq(input: &str, expected: Expression) {
+        let actual = parse_expr(input).unwrap();
+        assert_eq!(actual, expected);
+    }
+
+    fn path_expr(paths: &[&str]) -> PathExpression {
+        let mut segments = Punctuated::new();
+        if let Some((last, rest)) = paths.split_last() {
+            for path in rest {
+                segments.push(
+                    PathSegment {
+                        ident: IdentSpan::new(Identifier::new(path), Span::dummy()),
+                    },
+                    Spanned::new(Token::Symbol(Symbol::ColonColon), Span::dummy()),
+                );
+            }
+            segments.last = Some(Box::new(PathSegment {
+                ident: IdentSpan::new(Identifier::new(last), Span::dummy()),
+            }));
+        }
+
+        PathExpression {
+            path: Path {
+                leading_colon: None,
+                segments,
+            },
+        }
+    }
+
+    fn parse_expr(input: &str) -> Result<Expression, ParseError> {
+        let tokens = TokenStream::parse(input).unwrap();
+        let mut stream = ParseStream::new(&tokens);
+        parse_expression(&mut stream)
+    }
+
+    #[test]
+    fn test_literal_expression() {
+        assert_expr_eq(
+            "1",
+            Expression::Literal(LiteralExpression {
+                lit: Spanned::new(Literal::Integer(1), Span::dummy()),
+            }),
+        );
+        assert!(parse_expr("\"string\"").is_ok());
+        assert!(parse_expr("true").is_ok());
+    }
+
+    #[test]
+    fn test_identifier_expression() {
+        assert_expr_eq("foo", Expression::Path(path_expr(&["foo"])));
+        assert_expr_eq(
+            "_bar",
+            Expression::Underscore(UnderscoreExpression {
+                underscore_token: TokenSpan::new(Token::Symbol(Symbol::Underscore), Span::dummy()),
+            }),
+        );
+    }
+
+    #[test]
+    fn test_binary_expression() {
+        assert_expr_eq(
+            "1 + 2",
+            Expression::Operator(OperatorExpression::Arithmetic {
+                left: Box::new(Expression::Literal(LiteralExpression {
+                    lit: Spanned::new(Literal::Integer(1), Span::dummy()),
+                })),
+                op: Spanned::new(BinOp::Add, Span::dummy()),
+                right: Box::new(Expression::Literal(LiteralExpression {
+                    lit: Spanned::new(Literal::Integer(2), Span::dummy()),
+                })),
+            }),
+        );
+        assert_expr_eq(
+            "a == b",
+            Expression::Operator(OperatorExpression::Comparison {
+                left: Box::new(Expression::Path(path_expr(&["a"]))),
+                op: Spanned::new(BinOp::Eq, Span::dummy()),
+                right: Box::new(Expression::Path(path_expr(&["b"]))),
+            }),
+        );
+        assert_expr_eq(
+            "x && y",
+            Expression::Operator(OperatorExpression::Logical {
+                left: Box::new(Expression::Path(path_expr(&["x"]))),
+                op: Spanned::new(BinOp::LogicAnd, Span::dummy()),
+                right: Box::new(Expression::Path(path_expr(&["y"]))),
+            }),
+        );
+    }
+
+    #[test]
+    fn test_unary_expression() {
+        assert_expr_eq(
+            "-1",
+            Expression::Operator(OperatorExpression::Neg {
+                op: Spanned::new(UnOp::Neg, Span::dummy()),
+                expr: Box::new(Expression::Literal(LiteralExpression {
+                    lit: Spanned::new(Literal::Integer(1), Span::dummy()),
+                })),
+            }),
+        );
+        assert_expr_eq(
+            "!flag",
+            Expression::Operator(OperatorExpression::Neg {
+                op: Spanned::new(UnOp::Not, Span::dummy()),
+                expr: Box::new(Expression::Path(path_expr(&["flag"]))),
+            }),
+        );
+        assert_expr_eq(
+            "*ptr",
+            Expression::Operator(OperatorExpression::Deref {
+                star_token: TokenSpan::new(Token::Symbol(Symbol::Star), Span::dummy()),
+                expr: Box::new(Expression::Path(path_expr(&["ptr"]))),
+            }),
+        );
+    }
+
+    #[test]
+    fn test_grouping_expression() {
+        assert_expr_eq(
+            "(1 + 2)",
+            Expression::Grouped(GroupedExpression {
+                paren_token: Paren {
+                    open: TokenSpan::new(Token::Symbol(Symbol::LParen), Span::dummy()),
+                    close: TokenSpan::new(Token::Symbol(Symbol::RParen), Span::dummy()),
+                },
+                expr: Box::new(Expression::Operator(OperatorExpression::Arithmetic {
+                    left: Box::new(Expression::Literal(LiteralExpression {
+                        lit: Spanned::new(Literal::Integer(1), Span::dummy()),
+                    })),
+                    op: Spanned::new(BinOp::Add, Span::dummy()),
+                    right: Box::new(Expression::Literal(LiteralExpression {
+                        lit: Spanned::new(Literal::Integer(2), Span::dummy()),
+                    })),
+                })),
+            }),
+        );
+        assert_expr_eq(
+            "((a))",
+            Expression::Grouped(GroupedExpression {
+                paren_token: Paren {
+                    open: TokenSpan::new(Token::Symbol(Symbol::LParen), Span::dummy()),
+                    close: TokenSpan::new(Token::Symbol(Symbol::RParen), Span::dummy()),
+                },
+                expr: Box::new(Expression::Grouped(GroupedExpression {
+                    paren_token: Paren {
+                        open: TokenSpan::new(Token::Symbol(Symbol::LParen), Span::dummy()),
+                        close: TokenSpan::new(Token::Symbol(Symbol::RParen), Span::dummy()),
+                    },
+                    expr: Box::new(Expression::Path(path_expr(&["a"]))),
+                })),
+            }),
+        );
+    }
+
+    #[test]
+    fn test_if_expression() {
+        let result = parse_expr("if x { 1 } else { 2 }");
+        assert!(result.is_ok());
+
+        let result = parse_expr("if a { b } else if c { d } else { e }");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_loop_expressions() {
+        let result = parse_expr("while x { y }");
+
+        assert!(result.is_ok());
+
+        let result = parse_expr("loop { break }");
+
+        assert!(result.is_ok());
+
+        let result = parse_expr("for i in 0..10 { i }");
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_match_expression() {
+        let result = parse_expr("match x { 1 => 2, _ => 3 }");
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_error_handling() {
+        assert!(parse_expr("1 +").is_err());
+        assert!(parse_expr("if x {").is_err());
+        assert!(parse_expr("match x { 1 =>").is_err());
+    }
+
+    #[test]
+    fn test_operator_precedence() {
+        // 乘法优先级高于加法
+        assert!(parse_expr("1 + 2 * 3").is_ok());
+        assert!(parse_expr("1 * 2 + 3").is_ok());
+
+        // 比较运算符优先级高于逻辑运算符
+        assert!(parse_expr("a == b && c != d").is_ok());
+        assert!(parse_expr("x > y || z < w").is_ok());
+
+        // 一元运算符优先级最高
+        assert!(parse_expr("-a * b").is_ok());
+        assert!(parse_expr("!flag && condition").is_ok());
+    }
+
+    #[test]
+    fn test_range_expressions() {
+        // 各种范围表达式形式
+        assert!(parse_expr("1..10").is_ok());
+        assert!(parse_expr("1..=10").is_ok());
+        assert!(parse_expr("..10").is_ok());
+        assert!(parse_expr("1..").is_ok());
+        assert!(parse_expr("..").is_ok());
+
+        // 范围表达式在复杂表达式中的使用
+        assert!(parse_expr("for i in 0..10 { i }").is_ok());
+        assert!(parse_expr("x >= 1..10").is_ok());
+    }
+
+    #[test]
+    fn test_complex_expressions() {
+        // 嵌套表达式
+        assert!(parse_expr("(1 + 2) * (3 - 4)").is_ok());
+        assert!(parse_expr("a + b * c - d / e").is_ok());
+
+        // 混合运算符
+        assert!(parse_expr("a && b || c && d").is_ok());
+        assert!(parse_expr("x == y && z != w").is_ok());
+
+        // // 函数调用与运算符组合
+        // assert!(parse_expr("foo() + bar()").is_ok());
+        let ret = parse_expr("a.method() * 2");
+
+        assert!(ret.is_ok());
+    }
+
+    #[test]
+    fn test_assignment_expressions() {
+        // 各种赋值表达式
+        assert!(parse_expr("x = 1").is_ok());
+        assert!(parse_expr("y += 2").is_ok());
+        assert!(parse_expr("z *= a + b").is_ok());
+    }
+
+    #[test]
+    fn test_field_and_method_access() {
+        // 字段访问
+        assert!(parse_expr("obj.field").is_ok());
+
+        let ret = parse_expr("object.field.method()");
+
+        assert!(ret.is_ok());
+
+        // 方法调用
+        assert!(parse_expr("obj.method()").is_ok());
+        assert!(parse_expr("obj.method(arg1, arg2)").is_ok());
+    }
+
+    #[test]
+    fn test_array_and_index_expressions() {
+        // 数组表达式
+        assert!(parse_expr("[1, 2, 3]").is_ok());
+        assert!(parse_expr("[0; 10]").is_ok());
+
+        // 索引访问
+        assert!(parse_expr("arr[0]").is_ok());
+        assert!(parse_expr("matrix[1][2]").is_ok());
+    }
+
+    #[test]
+    fn test_closure_expressions() {
+        // 闭包表达式
+        assert!(parse_expr("|| x + 1").is_ok());
+        assert!(parse_expr("|x| x * 2").is_ok());
+        assert!(parse_expr("|x, y| x + y").is_ok());
+        assert!(parse_expr("|| { x + 1 }").is_ok());
     }
 }

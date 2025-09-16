@@ -1,4 +1,4 @@
-use std::{borrow::Cow, iter::Peekable};
+use std::{borrow::Cow, fmt::{Debug, Display}, iter::Peekable};
 
 use crate::{
     diagnostic::{Span, Spanned},
@@ -72,8 +72,8 @@ impl ParseError {
         self
     }
 
-    pub fn with_found(mut self, found: impl Into<String>) -> Self {
-        self.found = Some(found.into());
+    pub fn with_found(mut self, found: impl Display) -> Self {
+        self.found = Some(found.to_string());
         self
     }
 
@@ -121,10 +121,10 @@ pub struct ParseStream<'i> {
 }
 
 impl<'i> ParseStream<'i> {
-    pub fn new(token_stream: &'i TokenStream) -> Result<Self, ParseError> {
-        Ok(ParseStream {
+    pub fn new(token_stream: &'i TokenStream) -> Self {
+        ParseStream {
             iter: token_stream.iter().peekable(),
-        })
+        }
     }
 
     pub fn lookahead1(&mut self) -> Result<&'i TokenSpan, ParseError> {

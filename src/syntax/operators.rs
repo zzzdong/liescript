@@ -5,7 +5,7 @@ use crate::lexical::{
     Brace, Bracket, IdentSpan, Keyword, LiteralSpan, Paren, Punctuated, Symbol, Token, TokenSpan,
 };
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+#[derive(Copy, Clone, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum UnOp {
     Neg,    // -
     Not,    // !
@@ -13,39 +13,7 @@ pub enum UnOp {
     Borrow, // &
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub enum BinOp {
-    Add,             // +
-    Sub,             // -
-    Mul,             // *
-    Div,             // /
-    Rem,             // %
-    BitAnd,          // &
-    BitOr,           // |
-    BitXor,          // ^
-    BitShl,          // <<
-    BitShr,          // >>
-    Eq,              // ==
-    NotEq,           // !=
-    LessThen,        // <
-    LessThenOrEq,    // <=
-    GreaterThen,     // >
-    GreaterThenOrEq, // >=
-    LogicAnd,        // &&
-    LogicOr,         // ||
-    Assign,          // =
-    AddAssign,       // +=
-    SubAssign,       // -=
-    MulAssign,       // *=
-    DivAssign,       // /=
-    RemAssign,       // %=
-    Range,           // ..
-    RangeInclusive,  // ..=
-    Cast,            // as
-}
-
 pub type UnOpSpan = Spanned<UnOp>;
-pub type BinOpSpan = Spanned<BinOp>;
 
 impl UnOp {
     pub const ALL: &'static [UnOp] = &[UnOp::Neg, UnOp::Not, UnOp::Deref];
@@ -86,6 +54,45 @@ impl UnOp {
         }
     }
 }
+
+impl fmt::Display for UnOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+#[derive(Copy, Clone, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum BinOp {
+    Add,             // +
+    Sub,             // -
+    Mul,             // *
+    Div,             // /
+    Rem,             // %
+    BitAnd,          // &
+    BitOr,           // |
+    BitXor,          // ^
+    BitShl,          // <<
+    BitShr,          // >>
+    Eq,              // ==
+    NotEq,           // !=
+    LessThen,        // <
+    LessThenOrEq,    // <=
+    GreaterThen,     // >
+    GreaterThenOrEq, // >=
+    LogicAnd,        // &&
+    LogicOr,         // ||
+    Assign,          // =
+    AddAssign,       // +=
+    SubAssign,       // -=
+    MulAssign,       // *=
+    DivAssign,       // /=
+    RemAssign,       // %=
+    Range,           // ..
+    RangeInclusive,  // ..=
+    Cast,            // as
+}
+
+pub type BinOpSpan = Spanned<BinOp>;
 
 impl BinOp {
     pub const ALL: &'static [BinOp] = &[
@@ -128,6 +135,14 @@ impl BinOp {
 
     pub fn from_token(token: &Token) -> Option<Self> {
         match token {
+            Token::Symbol(Symbol::Plus) => Some(BinOp::Add),
+            Token::Symbol(Symbol::Minus) => Some(BinOp::Sub),
+            Token::Symbol(Symbol::Star) => Some(BinOp::Mul),
+            Token::Symbol(Symbol::Slash) => Some(BinOp::Div),
+            Token::Symbol(Symbol::Percent) => Some(BinOp::Rem),
+            Token::Symbol(Symbol::And) => Some(BinOp::BitAnd),
+            Token::Symbol(Symbol::Or) => Some(BinOp::BitOr),
+            Token::Symbol(Symbol::Caret) => Some(BinOp::BitXor),
             Token::Symbol(Symbol::Shl) => Some(BinOp::BitShl),
             Token::Symbol(Symbol::Shr) => Some(BinOp::BitShr),
             Token::Symbol(Symbol::EqEq) => Some(BinOp::Eq),
@@ -141,8 +156,8 @@ impl BinOp {
             Token::Symbol(Symbol::StarEq) => Some(BinOp::MulAssign),
             Token::Symbol(Symbol::SlashEq) => Some(BinOp::DivAssign),
             Token::Symbol(Symbol::PercentEq) => Some(BinOp::RemAssign),
-            Token::Symbol(Symbol::DotDot) => Some(BinOp::Range),
-            Token::Symbol(Symbol::DotDotEq) => Some(BinOp::RangeInclusive),
+            // Token::Symbol(Symbol::DotDot) => Some(BinOp::Range),
+            // Token::Symbol(Symbol::DotDotEq) => Some(BinOp::RangeInclusive),
             Token::Keyword(Keyword::As) => Some(BinOp::Cast),
             _ => None,
         }
@@ -223,13 +238,55 @@ impl BinOp {
     }
 }
 
-impl fmt::Display for UnOp {
+impl fmt::Display for BinOp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.as_str())
     }
 }
 
-impl fmt::Display for BinOp {
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum PostfixOp {
+    FieldAccess, // field access
+    Index,       // array index
+    Call,        // call
+    Try,         // try
+}
+
+impl PostfixOp {
+    pub const ALL: &'static [PostfixOp] = &[
+        PostfixOp::FieldAccess,
+        PostfixOp::Index,
+        PostfixOp::Call,
+        PostfixOp::Try,
+    ];
+
+    pub const STRS: &'static [&'static str] = &[".", "[", "(", "?"];
+
+    pub fn all() -> impl Iterator<Item = PostfixOp> {
+        Self::ALL.iter().copied()
+    }
+
+    pub fn from_token(token: &Token) -> Option<Self> {
+        match token {
+            Token::Symbol(Symbol::Dot) => Some(PostfixOp::FieldAccess),
+            Token::Symbol(Symbol::LBracket) => Some(PostfixOp::Index),
+            Token::Symbol(Symbol::LParen) => Some(PostfixOp::Call),
+            Token::Symbol(Symbol::Question) => Some(PostfixOp::Try),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PostfixOp::FieldAccess => ".",
+            PostfixOp::Index => "[",
+            PostfixOp::Call => "(",
+            PostfixOp::Try => "?",
+        }
+    }
+}
+
+impl fmt::Display for PostfixOp {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.as_str())
     }

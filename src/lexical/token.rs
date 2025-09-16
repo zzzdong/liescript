@@ -198,7 +198,7 @@ impl From<Keyword> for Token {
 }
 
 /// `[]`
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Bracket {
     pub open: TokenSpan,
     pub close: TokenSpan,
@@ -215,7 +215,7 @@ impl Bracket {
 }
 
 /// `()`
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Paren {
     pub open: TokenSpan,
     pub close: TokenSpan,
@@ -232,7 +232,7 @@ impl Paren {
 }
 
 /// `{}`
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Brace {
     pub open: TokenSpan,
     pub close: TokenSpan,
@@ -279,7 +279,7 @@ impl Bracketed for Brace {
 }
 
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Punctuated<T> {
     pub items: Vec<(T, TokenSpan)>,
     pub last: Option<Box<T>>,

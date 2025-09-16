@@ -5,7 +5,7 @@ use crate::diagnostic::{HasSpan, Span, Spanned};
 use crate::lexical::{Brace, Bracket, IdentSpan, LiteralSpan, Paren, Punctuated, TokenSpan};
 
 /// 路径，用于表示命名空间中的项
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Path {
     pub leading_colon: Option<TokenSpan>,
     pub segments: Punctuated<PathSegment>,
@@ -38,7 +38,7 @@ impl HasSpan for Path {
 }
 
 /// 路径段
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct PathSegment {
     pub ident: IdentSpan,
 }

@@ -64,6 +64,13 @@ impl Span {
         Span { start, end }
     }
 
+    pub fn dummy() -> Self {
+        Span {
+            start: Pos::dummy(),
+            end: Pos::dummy(),
+        }
+    }
+
     pub fn join(self, other: Span) -> Self {
         Span {
             start: self.start,
@@ -91,7 +98,7 @@ pub struct Pos {
 }
 
 impl Pos {
-    pub fn new() -> Self {
+    pub fn dummy() -> Self {
         Pos {
             file: 0,
             offset: 0,
@@ -99,11 +106,20 @@ impl Pos {
             column: 1,
         }
     }
+
+    pub(crate) fn from_offset(offset: usize) -> Self {
+        Pos {
+            file: 0,
+            offset,
+            line: 1,
+            column: 1 + offset,
+        }
+    }
 }
 
 impl Default for Pos {
     fn default() -> Self {
-        Self::new()
+        Self::dummy()
     }
 }
 

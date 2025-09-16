@@ -16,7 +16,7 @@ use crate::syntax::{Statement, Visibility};
 /// - 导入声明
 ///
 /// 参考：https://doc.rust-lang.org/reference/items.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Item {
     /// 函数定义
     Function(FunctionItem),
@@ -70,7 +70,7 @@ impl HasSpan for Item {
 /// FunctionItem → fn IDENTIFIER GenericParams? FunctionParameters FunctionReturnType? FunctionBody
 ///
 /// 参考：https://doc.rust-lang.org/reference/items/functions.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct FunctionItem {
     pub fn_token: TokenSpan,
     pub name: IdentSpan,
@@ -98,7 +98,7 @@ impl HasSpan for FunctionItem {
 /// FunctionParameters → ( FunctionParamList? )
 ///
 /// 参考：https://doc.rust-lang.org/reference/items/functions.html#function-parameters
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct FunctionParams {
     pub paren_token: Paren,
     pub params: Punctuated<FunctionParam>,
@@ -122,7 +122,7 @@ impl HasSpan for FunctionParams {
 /// FunctionParam → Pattern TypeAnnotation
 ///
 /// 参考：https://doc.rust-lang.org/reference/items/functions.html#function-parameters
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct FunctionParam {
     pub pattern: Pattern,
     pub type_annotation: (TokenSpan, Box<Type>), // (: token, type)
@@ -146,7 +146,7 @@ impl HasSpan for FunctionParam {
 /// FunctionBody → BlockExpression
 ///
 /// 参考：https://doc.rust-lang.org/reference/items/functions.html#function-bodies
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct FunctionBody {
     pub brace_token: Brace,
     pub stmts: Vec<Statement>,
@@ -170,7 +170,7 @@ impl HasSpan for FunctionBody {
 /// GenericParams → < GenericParamList >
 ///
 /// 参考：https://doc.rust-lang.org/reference/items/generics.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct GenericParams {
     pub angle_bracket_token: (TokenSpan, TokenSpan), // (<, >)
     pub params: Punctuated<GenericParam>,
@@ -197,7 +197,7 @@ impl HasSpan for GenericParams {
 /// GenericParam → IDENTIFIER ( : TypeParamBounds? )? ( = Type )?
 ///
 /// 参考：https://doc.rust-lang.org/reference/items/generics.html#generic-parameters
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum GenericParam {
     /// 类型参数
     Type(TypeParam),
@@ -218,7 +218,7 @@ impl HasSpan for GenericParam {
 }
 
 /// 类型参数
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct TypeParam {
     pub name: IdentSpan,
     pub bounds: Option<(TokenSpan, Punctuated<TypeParamBound>)>, // (: token, bounds)
@@ -259,7 +259,7 @@ impl HasSpan for TypeParam {
 /// StructItem → struct IDENTIFIER GenericParams? ( StructFields? ) ;
 ///
 /// 参考：https://doc.rust-lang.org/reference/items/structs.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct StructItem {
     pub struct_token: TokenSpan,
     pub name: IdentSpan,
@@ -292,7 +292,7 @@ impl HasSpan for StructItem {
 /// StructFields → NamedFields | TupleFields
 ///
 /// 参考：https://doc.rust-lang.org/reference/items/structs.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum StructFields {
     /// 命名字段，如 `struct Point { x: i32, y: i32 }`
     Named(NamedFields),
@@ -326,7 +326,7 @@ impl HasSpan for StructFields {
 /// NamedFields → { NamedFieldList? }
 ///
 /// 参考：https://doc.rust-lang.org/reference/items/structs.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct NamedFields {
     pub brace_token: Brace,
     pub visibility: Option<Visibility>,
@@ -351,7 +351,7 @@ impl HasSpan for NamedFields {
 /// NamedField → IDENTIFIER : Type
 ///
 /// 参考：https://doc.rust-lang.org/reference/items/structs.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct NamedField {
     pub name: IdentSpan,
     pub colon_token: TokenSpan,
@@ -376,7 +376,7 @@ impl HasSpan for NamedField {
 /// TupleFields → ( TupleFieldList? )
 ///
 /// 参考：https://doc.rust-lang.org/reference/items/structs.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct TupleFields {
     pub paren_token: Paren,
     pub visibility: Option<Visibility>,
@@ -396,7 +396,7 @@ impl HasSpan for TupleFields {
 }
 
 /// 单个元组字段
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct TupleField {
     pub visibility: Option<Visibility>,
     pub ty: Box<Type>,
@@ -423,7 +423,7 @@ impl HasSpan for TupleField {
 /// EnumItem → enum IDENTIFIER GenericParams? { EnumVariants? }
 ///
 /// 参考：https://doc.rust-lang.org/reference/items/enumerations.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct EnumItem {
     pub enum_token: TokenSpan,
     pub name: IdentSpan,
@@ -450,7 +450,7 @@ impl HasSpan for EnumItem {
 /// EnumVariant → IDENTIFIER ( EnumVariantFields? )? EnumVariantDiscriminant?
 ///
 /// 参考：https://doc.rust-lang.org/reference/items/enumerations.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct EnumVariant {
     pub name: IdentSpan,
     pub fields: Option<EnumVariantFields>,
@@ -484,7 +484,7 @@ impl HasSpan for EnumVariant {
 /// EnumVariantFields → NamedFields | TupleFields
 ///
 /// 参考：https://doc.rust-lang.org/reference/items/enumerations.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum EnumVariantFields {
     /// 命名字段，如 `enum Message { Move { x: i32, y: i32 } }`
     Named(NamedFields),
@@ -514,7 +514,7 @@ impl HasSpan for EnumVariantFields {
 /// TypeAliasItem → type IDENTIFIER GenericParams? = Type ;
 ///
 /// 参考：https://doc.rust-lang.org/reference/items/type-aliases.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct TypeAliasItem {
     pub type_token: TokenSpan,
     pub name: IdentSpan,
@@ -542,7 +542,7 @@ impl HasSpan for TypeAliasItem {
 /// ConstItem → const IDENTIFIER : Type = Expression ;
 ///
 /// 参考：https://doc.rust-lang.org/reference/items/constant-items.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct ConstItem {
     pub const_token: TokenSpan,
     pub name: IdentSpan,
@@ -571,7 +571,7 @@ impl HasSpan for ConstItem {
 /// StaticItem → static MUT? IDENTIFIER : Type = Expression ;
 ///
 /// 参考：https://doc.rust-lang.org/reference/items/static-items.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct StaticItem {
     pub static_token: TokenSpan,
     pub name: IdentSpan,
@@ -600,7 +600,7 @@ impl HasSpan for StaticItem {
 /// ModuleItem → mod IDENTIFIER ( ; | { InnerItem* } )
 ///
 /// 参考：https://doc.rust-lang.org/reference/items/modules.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct ModuleItem {
     pub mod_token: TokenSpan,
     pub name: IdentSpan,
@@ -629,7 +629,7 @@ impl HasSpan for ModuleItem {
 }
 
 /// 模块内容
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct ModuleContent {
     pub brace_token: Brace,
     pub items: Vec<Item>,
@@ -653,7 +653,7 @@ impl HasSpan for ModuleContent {
 /// UseItem → use UseTree ;
 ///
 /// 参考：https://doc.rust-lang.org/reference/items/use-declarations.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct UseItem {
     pub use_token: TokenSpan,
     pub tree: UseTree,
@@ -681,7 +681,7 @@ impl HasSpan for UseItem {
 ///     | SimplePath ( as ( IDENTIFIER | _ ) )?
 ///
 /// 参考：https://doc.rust-lang.org/reference/items/use-declarations.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum UseTree {
     /// 通配符导入，如 `use std::io::*`
     Glob(UseGlobTree),
@@ -714,7 +714,7 @@ impl HasSpan for UseTree {
 }
 
 /// 路径导入
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct UsePathTree {
     pub path: Path,
     pub colon_colon: Option<TokenSpan>,
@@ -741,7 +741,7 @@ impl HasSpan for UsePathTree {
 }
 
 /// 分组导入
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct UseGroupTree {
     pub brace_token: Brace,
     pub items: Punctuated<UseTree>,
@@ -760,7 +760,7 @@ impl HasSpan for UseGroupTree {
 }
 
 /// 通配符导入
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct UseGlobTree {
     pub prefix: Option<Path>,
     pub colon_colon: Option<TokenSpan>,
@@ -780,7 +780,7 @@ impl HasSpan for UseGlobTree {
 }
 
 /// 重命名导入
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct UseRenameTree {
     pub name: IdentSpan,
     pub as_token: TokenSpan,
@@ -806,7 +806,7 @@ impl HasSpan for UseRenameTree {
 /// TypeParamBound → TraitBound
 ///
 /// 参考：https://doc.rust-lang.org/reference/trait-bounds.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum TypeParamBound {
     /// 特质约束
     Trait(TraitBound),
@@ -832,7 +832,7 @@ impl HasSpan for TypeParamBound {
 /// TraitBound → Path
 ///
 /// 参考：https://doc.rust-lang.org/reference/trait-bounds.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct TraitBound {
     pub path: Path,
 }
