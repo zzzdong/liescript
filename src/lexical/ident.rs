@@ -2,7 +2,6 @@ use std::fmt;
 
 use crate::diagnostic::Spanned;
 
-
 pub type IdentSpan = Spanned<Identifier>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

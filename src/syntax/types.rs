@@ -1,6 +1,7 @@
-use super::{BinOp, Expression, Path, Pattern, RangeLimits, Statement, UnOp};
+use super::{BinOp, Expression, Pattern, RangeLimits, Statement, UnOp};
 use crate::diagnostic::{HasSpan, Span, Spanned};
 use crate::lexical::{Brace, Bracket, IdentSpan, LiteralSpan, Paren, Punctuated, TokenSpan};
+use crate::syntax::TypePath;
 
 /// Type 是一种用于表示值类型的语法结构
 ///
@@ -171,24 +172,6 @@ impl ParenthesizedType {
 }
 
 impl HasSpan for ParenthesizedType {
-    fn span(&self) -> Span {
-        self.span()
-    }
-}
-
-/// 类型路径
-#[derive(Debug, PartialEq)]
-pub struct TypePath {
-    pub path: Path,
-}
-
-impl TypePath {
-    pub fn span(&self) -> Span {
-        self.path.span()
-    }
-}
-
-impl HasSpan for TypePath {
     fn span(&self) -> Span {
         self.span()
     }

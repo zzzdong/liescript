@@ -2,7 +2,6 @@ use crate::diagnostic::Spanned;
 
 pub type KeywordSpan = Spanned<Keyword>;
 
-
 macro_rules! define_keywords {
     (
         $(
@@ -104,12 +103,12 @@ define_keywords! {
     Unsized => "unsized",
     Virtual => "virtual",
     Yield => "yield",
-    
+
     // 弱关键字(Weak keywords)
     Async => "async",
     Await => "await",
     Dyn => "dyn",
-    
+
     // 类型关键字(Type keywords)
     Any => "any",
     Bool => "bool",

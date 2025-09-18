@@ -1,10 +1,10 @@
-mod syntax;
-mod lexical;
 mod bytecode;
 mod diagnostic;
 mod error;
 mod instructions;
+mod lexical;
 mod parser;
+mod syntax;
 mod value;
 mod vm;
 

@@ -1,7 +1,7 @@
-use super::{BinOp, Expression, Path, Pattern, RangeLimits, Type, UnOp};
+use super::{BinOp, Expression, Pattern, RangeLimits, Type, UnOp};
 use crate::diagnostic::{HasSpan, Span, Spanned};
 use crate::lexical::{Brace, Bracket, IdentSpan, LiteralSpan, Paren, Punctuated, TokenSpan};
-use crate::syntax::{Statement, Visibility};
+use crate::syntax::{SimplePath, Statement, TypePath, Visibility};
 
 /// 项声明语句，用于声明模块级别的项
 ///
@@ -683,17 +683,17 @@ impl HasSpan for UseItem {
 /// 参考：https://doc.rust-lang.org/reference/items/use-declarations.html
 #[derive(Debug, PartialEq)]
 pub enum UseTree {
-    /// 通配符导入，如 `use std::io::*`
-    Glob(UseGlobTree),
-    
-    /// 分组导入，如 `use std::{io, fs}`
-    Group(UseGroupTree),
-    
     /// 路径导入，如 `use std::io`
-    Path(UsePathTree),
-    
+    Path(SimplePath),
+
     /// 重命名导入，如 `use std::io as IO`
     Rename(UseRenameTree),
+
+    /// 通配符导入，如 `use std::io::*`
+    Glob(UseGlobTree),
+
+    /// 分组导入，如 `use std::{io, fs}`
+    Group(UseGroupTree),
 }
 
 impl UseTree {
@@ -716,7 +716,7 @@ impl HasSpan for UseTree {
 /// 路径导入
 #[derive(Debug, PartialEq)]
 pub struct UsePathTree {
-    pub path: Path,
+    pub path: SimplePath,
     pub colon_colon: Option<TokenSpan>,
     pub tree: Option<Box<UseTree>>,
 }
@@ -743,6 +743,7 @@ impl HasSpan for UsePathTree {
 /// 分组导入
 #[derive(Debug, PartialEq)]
 pub struct UseGroupTree {
+    pub prefix: Option<SimplePath>,
     pub brace_token: Brace,
     pub items: Punctuated<UseTree>,
 }
@@ -762,8 +763,7 @@ impl HasSpan for UseGroupTree {
 /// 通配符导入
 #[derive(Debug, PartialEq)]
 pub struct UseGlobTree {
-    pub prefix: Option<Path>,
-    pub colon_colon: Option<TokenSpan>,
+    pub prefix: Option<SimplePath>,
     pub star_token: TokenSpan,
 }
 
@@ -782,14 +782,14 @@ impl HasSpan for UseGlobTree {
 /// 重命名导入
 #[derive(Debug, PartialEq)]
 pub struct UseRenameTree {
-    pub name: IdentSpan,
+    pub path: SimplePath,
     pub as_token: TokenSpan,
     pub rename: IdentSpan,
 }
 
 impl UseRenameTree {
     pub fn span(&self) -> Span {
-        Span::new(self.name.span().start, self.rename.span().end)
+        Span::new(self.path.span().start, self.rename.span().end)
     }
 }
 
@@ -798,7 +798,6 @@ impl HasSpan for UseRenameTree {
         self.span()
     }
 }
-
 
 /// 类型参数约束
 ///
@@ -834,7 +833,7 @@ impl HasSpan for TypeParamBound {
 /// 参考：https://doc.rust-lang.org/reference/trait-bounds.html
 #[derive(Debug, PartialEq)]
 pub struct TraitBound {
-    pub path: Path,
+    pub path: TypePath,
 }
 
 impl TraitBound {
@@ -848,4 +847,3 @@ impl HasSpan for TraitBound {
         self.span()
     }
 }
-

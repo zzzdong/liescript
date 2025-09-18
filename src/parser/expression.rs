@@ -5,7 +5,7 @@ use crate::lexical::{
 };
 
 use crate::parser::parse;
-use crate::syntax::names::Path;
+use crate::syntax::names::PathInExpression;
 use crate::syntax::patterns::Pattern;
 use crate::syntax::statements::Statement;
 use crate::syntax::types::Type;
@@ -13,8 +13,6 @@ use crate::syntax::{BinOp, RangeLimits, UnOp};
 use crate::syntax::{PostfixOp, expressions::*};
 
 use super::parse::{Parse, ParseError, ParseStream};
-
-
 
 pub fn parse_expression(stream: &mut ParseStream) -> Result<Expression, ParseError> {
     parse_expr(stream, 0)
@@ -70,7 +68,12 @@ fn parse_primary(stream: &mut ParseStream) -> Result<Expression, ParseError> {
 
     match &start_token.value {
         Token::Literal(_) => parse_literal(stream),
-        Token::Ident(_) => parse_path(stream),
+        Token::Ident(_) => {
+            if let Some(expr) = stream.try_parse(parse_struct_expr) {
+                return Ok(Expression::Struct(expr));
+            }
+            parse_path(stream)
+        }
         Token::Symbol(Symbol::Underscore) => parse_underscore(stream),
         Token::Symbol(Symbol::LParen) => parse_paren(stream),
         Token::Symbol(Symbol::LBracket) => parse_array(stream).map(|expr| Expression::Array(expr)),
@@ -93,7 +96,6 @@ fn parse_primary(stream: &mut ParseStream) -> Result<Expression, ParseError> {
         Token::Symbol(Symbol::Or) | Token::Symbol(Symbol::OrOr) => {
             parse_closure(stream).map(|expr| Expression::Closure(expr))
         }
-
         _ => Err(ParseError::new("Expected primary expression")
             .with_span(start_token.span)
             .with_expected("valid primary expression")
@@ -329,7 +331,7 @@ fn parse_literal(stream: &mut ParseStream) -> Result<Expression, ParseError> {
 }
 
 fn parse_path(stream: &mut ParseStream) -> Result<Expression, ParseError> {
-    let path = Path::parse(stream)?;
+    let path = PathInExpression::parse(stream)?;
     Ok(Expression::Path(PathExpression { path }))
 }
 
@@ -652,10 +654,16 @@ fn parse_closure(stream: &mut ParseStream) -> Result<ClosureExpression, ParseErr
     // try parse || expr, `||` will be parsed as a binary operator
     if let Some(expr) = stream.try_parse(|s| {
         let oror_token = s.expect_symbol(Symbol::OrOr)?;
+        // split ||
+        let span = oror_token.span.clone();
+        let (span1, span2) = span.split(1);
+        let or1_token = TokenSpan::new(Token::Symbol(Symbol::Or), span1);
+        let or2_token = TokenSpan::new(Token::Symbol(Symbol::Or), span2);
+
         let body = Box::new(parse_expression(s)?);
         Ok(ClosureExpression {
             move_token: None,
-            or_token: (oror_token.clone(), oror_token),
+            or_token: (or1_token, or2_token),
             inputs: Punctuated::new(),
             output: None,
             body,
@@ -684,7 +692,7 @@ fn parse_closure(stream: &mut ParseStream) -> Result<ClosureExpression, ParseErr
 
     // 解析带参数的闭包
     let inputs =
-        stream.parse_punctuated_with(|s| Pattern::parse(s), &Token::Symbol(Symbol::Comma))?;
+        stream.parse_punctuated_with(parse_closure_param, &Token::Symbol(Symbol::Comma))?;
     let or2_token = stream.expect_symbol(Symbol::Or)?;
 
     // 可选的返回类型
@@ -701,6 +709,69 @@ fn parse_closure(stream: &mut ParseStream) -> Result<ClosureExpression, ParseErr
         inputs,
         output,
         body,
+    })
+}
+
+fn parse_closure_param(stream: &mut ParseStream) -> Result<ClosureParam, ParseError> {
+    let pattern = Pattern::parse(stream)?;
+
+    if stream.next_is(Symbol::Colon) {
+        return Ok(ClosureParam {
+            pattern,
+            colon_token: Some(stream.consume()?),
+            ty: Some(Box::new(Type::parse(stream)?)),
+        });
+    }
+
+    Ok(ClosureParam {
+        pattern,
+        colon_token: None,
+        ty: None,
+    })
+}
+
+fn parse_struct_expr(stream: &mut ParseStream) -> Result<StructExpression, ParseError> {
+    let path = PathInExpression::parse(stream)?;
+
+    let open = stream.expect_symbol(Symbol::LBrace)?;
+
+    let fields =
+        stream.parse_punctuated_with(parse_struct_expr_field, &Token::Symbol(Symbol::Comma))?;
+
+    let rest = stream.try_parse(|s| {
+        let dotdot_token = s.expect_symbol(Symbol::DotDot)?;
+        let expr = Box::new(parse_expression(s)?);
+        Ok((dotdot_token, expr))
+    });
+
+    let close = stream.expect_symbol(Symbol::RBrace)?;
+
+    Ok(StructExpression {
+        path,
+        brace_token: Brace::new(open, close),
+        fields,
+        rest,
+    })
+}
+
+fn parse_struct_expr_field(stream: &mut ParseStream) -> Result<StructExprField, ParseError> {
+    let member = stream.expect_identifier()?;
+
+    if !stream.next_is(Symbol::Colon) {
+        return Ok(StructExprField {
+            member,
+            colon_token: None,
+            expr: None,
+        });
+    }
+
+    let colon_token = stream.expect_symbol(Symbol::Colon)?;
+    let expr = Box::new(parse_expression(stream)?);
+
+    Ok(StructExprField {
+        member,
+        colon_token: Some(colon_token),
+        expr: Some(expr),
     })
 }
 
@@ -843,35 +914,44 @@ mod tests {
     use super::*;
     use crate::diagnostic::{Pos, Span};
     use crate::lexical::{IdentSpan, Identifier, Literal, Token, TokenStream};
-    use crate::syntax::{PathSegment, expressions::*};
+    use crate::syntax::{
+        ExpressionStatement, LetStatement, LiteralPattern, PathExprSegment, PathIdentSegment,
+        WildcardPattern, expressions::*,
+    };
 
     /// 解析表达式并忽略Span信息进行比较
-    fn assert_expr_eq(input: &str, expected: Expression) {
-        let actual = parse_expr(input).unwrap();
-        assert_eq!(actual, expected);
+    macro_rules! assert_expr_eq {
+        ($input:literal, $expected:expr) => {{
+            let actual = parse_expr($input).unwrap();
+            assert_eq!(actual, $expected);
+        }};
     }
 
     fn path_expr(paths: &[&str]) -> PathExpression {
+        PathExpression { path: path(paths) }
+    }
+
+    fn path(paths: &[&str]) -> PathInExpression {
         let mut segments = Punctuated::new();
         if let Some((last, rest)) = paths.split_last() {
             for path in rest {
                 segments.push(
-                    PathSegment {
-                        ident: IdentSpan::new(Identifier::new(path), Span::dummy()),
+                    PathExprSegment {
+                        ident: PathIdentSegment::Ident(Identifier::new(path).into()),
+                        args: None,
                     },
-                    Spanned::new(Token::Symbol(Symbol::ColonColon), Span::dummy()),
+                    Token::Symbol(Symbol::ColonColon).into(),
                 );
             }
-            segments.last = Some(Box::new(PathSegment {
-                ident: IdentSpan::new(Identifier::new(last), Span::dummy()),
-            }));
+            segments.push_last(PathExprSegment {
+                ident: PathIdentSegment::Ident(Identifier::new(last).into()),
+                args: None,
+            });
         }
 
-        PathExpression {
-            path: Path {
-                leading_colon: None,
-                segments,
-            },
+        PathInExpression {
+            leading_colon: None,
+            segments,
         }
     }
 
@@ -883,247 +963,827 @@ mod tests {
 
     #[test]
     fn test_literal_expression() {
-        assert_expr_eq(
+        assert_expr_eq!(
             "1",
             Expression::Literal(LiteralExpression {
-                lit: Spanned::new(Literal::Integer(1), Span::dummy()),
-            }),
+                lit: Literal::Integer(1).into(),
+            })
         );
-        assert!(parse_expr("\"string\"").is_ok());
-        assert!(parse_expr("true").is_ok());
+        assert_expr_eq!(
+            "\"string\"",
+            Expression::Literal(LiteralExpression {
+                lit: Literal::String("string".to_string()).into()
+            })
+        );
+        assert_expr_eq!(
+            "true",
+            Expression::Literal(LiteralExpression {
+                lit: Literal::Bool(true).into()
+            })
+        );
     }
 
     #[test]
     fn test_identifier_expression() {
-        assert_expr_eq("foo", Expression::Path(path_expr(&["foo"])));
-        assert_expr_eq(
-            "_bar",
-            Expression::Underscore(UnderscoreExpression {
-                underscore_token: TokenSpan::new(Token::Symbol(Symbol::Underscore), Span::dummy()),
-            }),
-        );
+        assert_expr_eq!("foo", Expression::Path(path_expr(&["foo"])));
+        assert_expr_eq!("_bar", Expression::Path(path_expr(&["_bar"])));
     }
 
     #[test]
     fn test_binary_expression() {
-        assert_expr_eq(
+        assert_expr_eq!(
             "1 + 2",
             Expression::Operator(OperatorExpression::Arithmetic {
                 left: Box::new(Expression::Literal(LiteralExpression {
-                    lit: Spanned::new(Literal::Integer(1), Span::dummy()),
+                    lit: Literal::Integer(1).into(),
                 })),
-                op: Spanned::new(BinOp::Add, Span::dummy()),
+                op: BinOp::Add.into(),
                 right: Box::new(Expression::Literal(LiteralExpression {
-                    lit: Spanned::new(Literal::Integer(2), Span::dummy()),
+                    lit: Literal::Integer(2).into(),
                 })),
-            }),
+            })
         );
-        assert_expr_eq(
+        assert_expr_eq!(
             "a == b",
             Expression::Operator(OperatorExpression::Comparison {
                 left: Box::new(Expression::Path(path_expr(&["a"]))),
-                op: Spanned::new(BinOp::Eq, Span::dummy()),
+                op: BinOp::Eq.into(),
                 right: Box::new(Expression::Path(path_expr(&["b"]))),
-            }),
+            })
         );
-        assert_expr_eq(
+        assert_expr_eq!(
             "x && y",
             Expression::Operator(OperatorExpression::Logical {
                 left: Box::new(Expression::Path(path_expr(&["x"]))),
-                op: Spanned::new(BinOp::LogicAnd, Span::dummy()),
+                op: BinOp::LogicAnd.into(),
                 right: Box::new(Expression::Path(path_expr(&["y"]))),
-            }),
+            })
         );
     }
 
     #[test]
     fn test_unary_expression() {
-        assert_expr_eq(
+        assert_expr_eq!(
             "-1",
             Expression::Operator(OperatorExpression::Neg {
-                op: Spanned::new(UnOp::Neg, Span::dummy()),
+                op: UnOp::Neg.into(),
                 expr: Box::new(Expression::Literal(LiteralExpression {
-                    lit: Spanned::new(Literal::Integer(1), Span::dummy()),
+                    lit: Literal::Integer(1).into(),
                 })),
-            }),
+            })
         );
-        assert_expr_eq(
+        assert_expr_eq!(
             "!flag",
             Expression::Operator(OperatorExpression::Neg {
-                op: Spanned::new(UnOp::Not, Span::dummy()),
+                op: UnOp::Not.into(),
                 expr: Box::new(Expression::Path(path_expr(&["flag"]))),
-            }),
+            })
         );
-        assert_expr_eq(
+        assert_expr_eq!(
             "*ptr",
             Expression::Operator(OperatorExpression::Deref {
-                star_token: TokenSpan::new(Token::Symbol(Symbol::Star), Span::dummy()),
+                star_token: Token::Symbol(Symbol::Star).into(),
                 expr: Box::new(Expression::Path(path_expr(&["ptr"]))),
-            }),
+            })
         );
     }
 
     #[test]
     fn test_grouping_expression() {
-        assert_expr_eq(
+        assert_expr_eq!(
             "(1 + 2)",
             Expression::Grouped(GroupedExpression {
                 paren_token: Paren {
-                    open: TokenSpan::new(Token::Symbol(Symbol::LParen), Span::dummy()),
-                    close: TokenSpan::new(Token::Symbol(Symbol::RParen), Span::dummy()),
+                    open: Token::Symbol(Symbol::LParen).into(),
+                    close: Token::Symbol(Symbol::RParen).into(),
                 },
                 expr: Box::new(Expression::Operator(OperatorExpression::Arithmetic {
                     left: Box::new(Expression::Literal(LiteralExpression {
-                        lit: Spanned::new(Literal::Integer(1), Span::dummy()),
+                        lit: Literal::Integer(1).into(),
                     })),
-                    op: Spanned::new(BinOp::Add, Span::dummy()),
+                    op: BinOp::Add.into(),
                     right: Box::new(Expression::Literal(LiteralExpression {
-                        lit: Spanned::new(Literal::Integer(2), Span::dummy()),
+                        lit: Literal::Integer(2).into(),
                     })),
                 })),
-            }),
+            })
         );
-        assert_expr_eq(
+        assert_expr_eq!(
             "((a))",
             Expression::Grouped(GroupedExpression {
                 paren_token: Paren {
-                    open: TokenSpan::new(Token::Symbol(Symbol::LParen), Span::dummy()),
-                    close: TokenSpan::new(Token::Symbol(Symbol::RParen), Span::dummy()),
+                    open: Token::Symbol(Symbol::LParen).into(),
+                    close: Token::Symbol(Symbol::RParen).into(),
                 },
                 expr: Box::new(Expression::Grouped(GroupedExpression {
                     paren_token: Paren {
-                        open: TokenSpan::new(Token::Symbol(Symbol::LParen), Span::dummy()),
-                        close: TokenSpan::new(Token::Symbol(Symbol::RParen), Span::dummy()),
+                        open: Token::Symbol(Symbol::LParen).into(),
+                        close: Token::Symbol(Symbol::RParen).into(),
                     },
                     expr: Box::new(Expression::Path(path_expr(&["a"]))),
                 })),
-            }),
+            })
         );
     }
 
     #[test]
     fn test_if_expression() {
-        let result = parse_expr("if x { 1 } else { 2 }");
-        assert!(result.is_ok());
-
-        let result = parse_expr("if a { b } else if c { d } else { e }");
-        assert!(result.is_ok());
+        assert_expr_eq!(
+            "if x { 1 } else { 2 }",
+            Expression::If(IfExpression {
+                if_token: Token::Keyword(Keyword::If).into(),
+                cond: Box::new(Expression::Path(path_expr(&["x"]))),
+                then_branch: BlockExpression {
+                    brace_token: Brace::new(
+                        Token::Symbol(Symbol::LBrace).into(),
+                        Token::Symbol(Symbol::RBrace).into(),
+                    ),
+                    stmts: vec![Statement::Expression(ExpressionStatement {
+                        expr: Expression::Literal(LiteralExpression {
+                            lit: Literal::Integer(1).into(),
+                        }),
+                        semi_token: None,
+                    })],
+                },
+                else_branch: Some((
+                    Token::Keyword(Keyword::Else).into(),
+                    Box::new(ElseBranch::Block(BlockExpression {
+                        brace_token: Brace::new(
+                            Token::Symbol(Symbol::LBrace).into(),
+                            Token::Symbol(Symbol::RBrace).into(),
+                        ),
+                        stmts: vec![Statement::Expression(ExpressionStatement {
+                            expr: Expression::Literal(LiteralExpression {
+                                lit: Literal::Integer(2).into(),
+                            }),
+                            semi_token: None,
+                        })],
+                    })),
+                )),
+            })
+        );
     }
 
     #[test]
-    fn test_loop_expressions() {
-        let result = parse_expr("while x { y }");
+    fn test_while_expression() {
+        assert_expr_eq!(
+            "while x < 10 { x = x + 1; }",
+            Expression::While(WhileLoopExpression {
+                label: None,
+                while_token: Token::Keyword(Keyword::While).into(),
+                cond: Box::new(Expression::Operator(OperatorExpression::Comparison {
+                    left: Box::new(Expression::Path(path_expr(&["x"]))),
+                    op: BinOp::LessThen.into(),
+                    right: Box::new(Expression::Literal(LiteralExpression {
+                        lit: Literal::Integer(10).into(),
+                    })),
+                })),
+                body: BlockExpression {
+                    brace_token: Brace::new(
+                        Token::Symbol(Symbol::LBrace).into(),
+                        Token::Symbol(Symbol::RBrace).into(),
+                    ),
+                    stmts: vec![Statement::Expression(ExpressionStatement {
+                        expr: Expression::Operator(OperatorExpression::Assign {
+                            left: Box::new(Expression::Path(path_expr(&["x"]))),
+                            eq_token: Token::Symbol(Symbol::Eq).into(),
+                            right: Box::new(Expression::Operator(OperatorExpression::Arithmetic {
+                                left: Box::new(Expression::Path(path_expr(&["x"]))),
+                                op: BinOp::Add.into(),
+                                right: Box::new(Expression::Literal(LiteralExpression {
+                                    lit: Literal::Integer(1).into(),
+                                })),
+                            })),
+                        }),
+                        semi_token: Some(Token::Symbol(Symbol::Semi).into()),
+                    })],
+                },
+            })
+        );
+    }
 
-        assert!(result.is_ok());
+    #[test]
+    fn test_loop_expression() {
+        assert_expr_eq!(
+            "loop { break; }",
+            Expression::Loop(LoopExpression {
+                label: None,
+                loop_token: Token::Keyword(Keyword::Loop).into(),
+                body: BlockExpression {
+                    brace_token: Brace::new(
+                        Token::Symbol(Symbol::LBrace).into(),
+                        Token::Symbol(Symbol::RBrace).into(),
+                    ),
+                    stmts: vec![Statement::Expression(ExpressionStatement {
+                        expr: Expression::Break(BreakExpression {
+                            break_token: Token::Keyword(Keyword::Break).into(),
+                            label: None,
+                            expr: None,
+                        }),
+                        semi_token: Some(Token::Symbol(Symbol::Semi).into()),
+                    })],
+                },
+            })
+        );
+    }
 
-        let result = parse_expr("loop { break }");
+    #[test]
+    fn test_break_expression() {
+        assert_expr_eq!(
+            "break;",
+            Expression::Break(BreakExpression {
+                break_token: Token::Keyword(Keyword::Break).into(),
+                label: None,
+                expr: None,
+            })
+        );
 
-        assert!(result.is_ok());
+        assert_expr_eq!(
+            "break 42;",
+            Expression::Break(BreakExpression {
+                break_token: Token::Keyword(Keyword::Break).into(),
+                label: None,
+                expr: Some(Box::new(Expression::Literal(LiteralExpression {
+                    lit: Literal::Integer(42).into(),
+                }))),
+            })
+        );
+    }
 
-        let result = parse_expr("for i in 0..10 { i }");
+    #[test]
+    fn test_continue_expression() {
+        assert_expr_eq!(
+            "continue;",
+            Expression::Continue(ContinueExpression {
+                continue_token: Token::Keyword(Keyword::Continue).into(),
+                label: None,
+            })
+        );
+    }
 
-        assert!(result.is_ok());
+    #[test]
+    fn test_return_expression() {
+        assert_expr_eq!(
+            "return;",
+            Expression::Return(ReturnExpression {
+                return_token: Token::Keyword(Keyword::Return).into(),
+                expr: None,
+            })
+        );
+
+        assert_expr_eq!(
+            "return x + 1;",
+            Expression::Return(ReturnExpression {
+                return_token: Token::Keyword(Keyword::Return).into(),
+                expr: Some(Box::new(Expression::Operator(
+                    OperatorExpression::Arithmetic {
+                        left: Box::new(Expression::Path(path_expr(&["x"]))),
+                        op: BinOp::Add.into(),
+                        right: Box::new(Expression::Literal(LiteralExpression {
+                            lit: Literal::Integer(1).into(),
+                        })),
+                    },
+                ))),
+            })
+        );
+    }
+
+    #[test]
+    fn test_range_expression() {
+        assert_expr_eq!(
+            "1..10",
+            Expression::Range(RangeExpression {
+                start: Some(Box::new(Expression::Literal(LiteralExpression {
+                    lit: Literal::Integer(1).into(),
+                }))),
+                limits: RangeLimits::HalfOpen.into(),
+                end: Some(Box::new(Expression::Literal(LiteralExpression {
+                    lit: Literal::Integer(10).into(),
+                }))),
+            })
+        );
+
+        assert_expr_eq!(
+            "1..=10",
+            Expression::Range(RangeExpression {
+                start: Some(Box::new(Expression::Literal(LiteralExpression {
+                    lit: Literal::Integer(1).into(),
+                }))),
+                limits: RangeLimits::Closed.into(),
+                end: Some(Box::new(Expression::Literal(LiteralExpression {
+                    lit: Literal::Integer(10).into(),
+                }))),
+            })
+        );
+
+        assert_expr_eq!(
+            "..10",
+            Expression::Range(RangeExpression {
+                start: None,
+                limits: RangeLimits::HalfOpen.into(),
+                end: Some(Box::new(Expression::Literal(LiteralExpression {
+                    lit: Literal::Integer(10).into(),
+                }))),
+            })
+        );
+    }
+
+    #[test]
+    fn test_array_expression() {
+        // 空数组
+        assert_expr_eq!(
+            "[]",
+            Expression::Array(ArrayExpression::Elements {
+                bracket_token: Bracket {
+                    open: Token::Symbol(Symbol::LBracket).into(),
+                    close: Token::Symbol(Symbol::RBracket).into(),
+                },
+                elems: Punctuated::new(),
+            })
+        );
+
+        // 数组字面量
+        assert_expr_eq!(
+            "[1, 2, 3]",
+            Expression::Array(ArrayExpression::Elements {
+                bracket_token: Bracket {
+                    open: Token::Symbol(Symbol::LBracket).into(),
+                    close: Token::Symbol(Symbol::RBracket).into(),
+                },
+                elems: {
+                    let mut elems = Punctuated::new();
+                    elems.push(
+                        Expression::Literal(LiteralExpression {
+                            lit: Literal::Integer(1).into(),
+                        }),
+                        Token::Symbol(Symbol::Comma).into(),
+                    );
+                    elems.push(
+                        Expression::Literal(LiteralExpression {
+                            lit: Literal::Integer(2).into(),
+                        }),
+                        Token::Symbol(Symbol::Comma).into(),
+                    );
+                    elems.last = Some(Box::new(Expression::Literal(LiteralExpression {
+                        lit: Literal::Integer(3).into(),
+                    })));
+                    elems
+                },
+            })
+        );
+
+        // 重复数组
+        assert_expr_eq!(
+            "[1; 3]",
+            Expression::Array(ArrayExpression::Repeat {
+                bracket_token: Bracket {
+                    open: Token::Symbol(Symbol::LBracket).into(),
+                    close: Token::Symbol(Symbol::RBracket).into(),
+                },
+                value: Box::new(Expression::Literal(LiteralExpression {
+                    lit: Literal::Integer(1).into(),
+                })),
+                semi_token: Token::Symbol(Symbol::Semi).into(),
+                count: Spanned::new(3, Span::dummy()),
+            })
+        );
+    }
+
+    #[test]
+    fn test_tuple_expression() {
+        // 空元组
+        assert_expr_eq!(
+            "()",
+            Expression::Tuple(TupleExpression {
+                paren_token: Paren {
+                    open: Token::Symbol(Symbol::LParen).into(),
+                    close: Token::Symbol(Symbol::RParen).into(),
+                },
+                elems: Punctuated::new(),
+            })
+        );
+
+        // 单元素元组
+        assert_expr_eq!(
+            "(42,)",
+            Expression::Tuple(TupleExpression {
+                paren_token: Paren {
+                    open: Token::Symbol(Symbol::LParen).into(),
+                    close: Token::Symbol(Symbol::RParen).into(),
+                },
+                elems: {
+                    let mut elems = Punctuated::new();
+                    elems.push(
+                        Expression::Literal(LiteralExpression {
+                            lit: Literal::Integer(42).into(),
+                        }),
+                        Token::Symbol(Symbol::Comma).into(),
+                    );
+                    elems
+                },
+            })
+        );
+
+        // 多元素元组
+        assert_expr_eq!(
+            "(1, 2, 3)",
+            Expression::Tuple(TupleExpression {
+                paren_token: Paren {
+                    open: Token::Symbol(Symbol::LParen).into(),
+                    close: Token::Symbol(Symbol::RParen).into(),
+                },
+                elems: {
+                    let mut elems = Punctuated::new();
+                    elems.push(
+                        Expression::Literal(LiteralExpression {
+                            lit: Literal::Integer(1).into(),
+                        }),
+                        Token::Symbol(Symbol::Comma).into(),
+                    );
+                    elems.push(
+                        Expression::Literal(LiteralExpression {
+                            lit: Literal::Integer(2).into(),
+                        }),
+                        Token::Symbol(Symbol::Comma).into(),
+                    );
+                    elems.last = Some(Box::new(Expression::Literal(LiteralExpression {
+                        lit: Literal::Integer(3).into(),
+                    })));
+                    elems
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn test_struct_expression() {
+        assert_expr_eq!(
+            "Point { x: 1, y: 2 }",
+            Expression::Struct(StructExpression {
+                path: path(&["Point"]),
+                brace_token: Brace {
+                    open: Token::Symbol(Symbol::LBrace).into(),
+                    close: Token::Symbol(Symbol::RBrace).into(),
+                },
+                fields: {
+                    let mut fields = Punctuated::new();
+                    fields.push(
+                        StructExprField {
+                            member: Identifier::new("x").into(),
+                            colon_token: Some(Token::Symbol(Symbol::Colon).into()),
+                            expr: Some(Box::new(Expression::Literal(LiteralExpression {
+                                lit: Literal::Integer(1).into(),
+                            }))),
+                        },
+                        Token::Symbol(Symbol::Comma).into(),
+                    );
+                    fields.push_last(StructExprField {
+                        member: Identifier::new("y").into(),
+                        colon_token: Some(Token::Symbol(Symbol::Colon).into()),
+                        expr: Some(Box::new(Expression::Literal(LiteralExpression {
+                            lit: Literal::Integer(2).into(),
+                        }))),
+                    });
+
+                    fields
+                },
+                rest: None,
+            })
+        )
+    }
+
+    #[test]
+    fn test_closure_expression() {
+        assert_expr_eq!(
+            "|| 42",
+            Expression::Closure(ClosureExpression {
+                move_token: None,
+                or_token: (
+                    Token::Symbol(Symbol::Or).into(),
+                    Token::Symbol(Symbol::Or).into(),
+                ),
+                inputs: Punctuated::new(),
+                output: None,
+                body: Box::new(Expression::Literal(LiteralExpression {
+                    lit: Literal::Integer(42).into(),
+                })),
+            })
+        );
+
+        assert_expr_eq!(
+            "|x| x + 1",
+            Expression::Closure(ClosureExpression {
+                move_token: None,
+                or_token: (
+                    Token::Symbol(Symbol::Or).into(),
+                    Token::Symbol(Symbol::Or).into(),
+                ),
+                inputs: {
+                    let mut inputs = Punctuated::new();
+                    inputs.last = Some(Box::new(ClosureParam {
+                        pattern: Identifier::new("x").into(),
+                        colon_token: None,
+                        ty: None,
+                    }));
+                    inputs
+                },
+                output: None,
+                body: Box::new(Expression::Operator(OperatorExpression::Arithmetic {
+                    left: Box::new(Expression::Path(path_expr(&["x"]))),
+                    op: BinOp::Add.into(),
+                    right: Box::new(Expression::Literal(LiteralExpression {
+                        lit: Literal::Integer(1).into(),
+                    })),
+                })),
+            })
+        );
+    }
+
+    #[test]
+    fn test_field_expression() {
+        assert_expr_eq!(
+            "obj.field",
+            Expression::Field(FieldExpression {
+                expr: Box::new(Expression::Path(path_expr(&["obj"]))),
+                dot_token: Token::Symbol(Symbol::Dot).into(),
+                field: IdentSpan::new(Identifier::new("field"), Span::dummy()),
+            })
+        );
+    }
+
+    #[test]
+    fn test_method_call_expression() {
+        assert_expr_eq!(
+            "obj.method()",
+            Expression::MethodCall(MethodCallExpression {
+                expr: Box::new(Expression::Path(path_expr(&["obj"]))),
+                dot_token: Token::Symbol(Symbol::Dot).into(),
+                method: IdentSpan::new(Identifier::new("method"), Span::dummy()),
+                paren_token: Paren {
+                    open: Token::Symbol(Symbol::LParen).into(),
+                    close: Token::Symbol(Symbol::RParen).into(),
+                },
+                args: Punctuated::new(),
+            })
+        );
+
+        assert_expr_eq!(
+            "obj.method(1, 2)",
+            Expression::MethodCall(MethodCallExpression {
+                expr: Box::new(Expression::Path(path_expr(&["obj"]))),
+                dot_token: Token::Symbol(Symbol::Dot).into(),
+                method: IdentSpan::new(Identifier::new("method"), Span::dummy()),
+                paren_token: Paren {
+                    open: Token::Symbol(Symbol::LParen).into(),
+                    close: Token::Symbol(Symbol::RParen).into(),
+                },
+                args: {
+                    let mut args = Punctuated::new();
+                    args.push(
+                        Expression::Literal(LiteralExpression {
+                            lit: Literal::Integer(1).into(),
+                        }),
+                        Token::Symbol(Symbol::Comma).into(),
+                    );
+                    args.last = Some(Box::new(Expression::Literal(LiteralExpression {
+                        lit: Literal::Integer(2).into(),
+                    })));
+                    args
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn test_call_expression() {
+        assert_expr_eq!(
+            "function()",
+            Expression::Call(CallExpression {
+                expr: Box::new(Expression::Path(path_expr(&["function"]))),
+                paren_token: Paren {
+                    open: Token::Symbol(Symbol::LParen).into(),
+                    close: Token::Symbol(Symbol::RParen).into(),
+                },
+                args: Punctuated::new(),
+            })
+        );
+
+        assert_expr_eq!(
+            "function(1, 2, 3)",
+            Expression::Call(CallExpression {
+                expr: Box::new(Expression::Path(path_expr(&["function"]))),
+                paren_token: Paren {
+                    open: Token::Symbol(Symbol::LParen).into(),
+                    close: Token::Symbol(Symbol::RParen).into(),
+                },
+                args: {
+                    let mut args = Punctuated::new();
+                    args.push(
+                        Expression::Literal(LiteralExpression {
+                            lit: Literal::Integer(1).into(),
+                        }),
+                        Token::Symbol(Symbol::Comma).into(),
+                    );
+                    args.push(
+                        Expression::Literal(LiteralExpression {
+                            lit: Literal::Integer(2).into(),
+                        }),
+                        Token::Symbol(Symbol::Comma).into(),
+                    );
+                    args.last = Some(Box::new(Expression::Literal(LiteralExpression {
+                        lit: Literal::Integer(3).into(),
+                    })));
+                    args
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn test_index_expression() {
+        assert_expr_eq!(
+            "arr[0]",
+            Expression::Index(IndexExpression {
+                expr: Box::new(Expression::Path(path_expr(&["arr"]))),
+                bracket_token: Bracket {
+                    open: Token::Symbol(Symbol::LBracket).into(),
+                    close: Token::Symbol(Symbol::RBracket).into(),
+                },
+                index: Box::new(Expression::Literal(LiteralExpression {
+                    lit: Literal::Integer(0).into(),
+                })),
+            })
+        );
+    }
+
+    #[test]
+    fn test_tuple_index_expression() {
+        assert_expr_eq!(
+            "tuple.0",
+            Expression::TupleIndex(TupleIndexingExpression {
+                expr: Box::new(Expression::Path(path_expr(&["tuple"]))),
+                dot_token: Token::Symbol(Symbol::Dot).into(),
+                index: Spanned::new(0, Span::dummy()),
+            })
+        );
+    }
+
+    #[test]
+    fn test_await_expression() {
+        assert_expr_eq!(
+            "future.await",
+            Expression::Await(AwaitExpression {
+                expr: Box::new(Expression::Path(path_expr(&["future"]))),
+                dot_token: Token::Symbol(Symbol::Dot).into(),
+                await_token: Token::Keyword(Keyword::Await).into(),
+            })
+        );
+    }
+
+    #[test]
+    fn test_try_expression() {
+        assert_expr_eq!(
+            "result?",
+            Expression::Operator(OperatorExpression::Try {
+                expr: Box::new(Expression::Path(path_expr(&["result"]))),
+                question_token: Token::Symbol(Symbol::Question).into(),
+            })
+        );
+    }
+
+    #[test]
+    fn test_assign_expression() {
+        assert_expr_eq!(
+            "x = 1",
+            Expression::Operator(OperatorExpression::Assign {
+                left: Box::new(Expression::Path(path_expr(&["x"]))),
+                eq_token: Token::Symbol(Symbol::Eq).into(),
+                right: Box::new(Expression::Literal(LiteralExpression {
+                    lit: Literal::Integer(1).into(),
+                })),
+            })
+        );
+    }
+
+    #[test]
+    fn test_compound_assign_expression() {
+        assert_expr_eq!(
+            "x += 1",
+            Expression::Operator(OperatorExpression::AssignOp {
+                left: Box::new(Expression::Path(path_expr(&["x"]))),
+                op: BinOp::AddAssign.into(),
+                right: Box::new(Expression::Literal(LiteralExpression {
+                    lit: Literal::Integer(1).into(),
+                })),
+            })
+        );
+
+        assert_expr_eq!(
+            "x -= 1",
+            Expression::Operator(OperatorExpression::AssignOp {
+                left: Box::new(Expression::Path(path_expr(&["x"]))),
+                op: BinOp::SubAssign.into(),
+                right: Box::new(Expression::Literal(LiteralExpression {
+                    lit: Literal::Integer(1).into(),
+                })),
+            })
+        );
+    }
+
+    #[test]
+    fn test_for_loop_expression() {
+        assert_expr_eq!(
+            "for i in 0..10 { }",
+            Expression::For(ForLoopExpression {
+                label: None,
+                for_token: Token::Keyword(Keyword::For).into(),
+                pat: Identifier::new("i").into(),
+                in_token: Token::Keyword(Keyword::In).into(),
+                expr: Box::new(Expression::Range(RangeExpression {
+                    start: Some(Box::new(Expression::Literal(LiteralExpression {
+                        lit: Literal::Integer(0).into(),
+                    }))),
+                    limits: RangeLimits::HalfOpen.into(),
+                    end: Some(Box::new(Expression::Literal(LiteralExpression {
+                        lit: Literal::Integer(10).into(),
+                    }))),
+                })),
+                body: BlockExpression {
+                    brace_token: Brace::new(
+                        Token::Symbol(Symbol::LBrace).into(),
+                        Token::Symbol(Symbol::RBrace).into(),
+                    ),
+                    stmts: vec![],
+                },
+            })
+        );
     }
 
     #[test]
     fn test_match_expression() {
-        let result = parse_expr("match x { 1 => 2, _ => 3 }");
-
-        assert!(result.is_ok());
+        assert_expr_eq!(
+            "match x { 1 => true, _ => false, }",
+            Expression::Match(MatchExpression {
+                match_token: Token::Keyword(Keyword::Match).into(),
+                expr: Box::new(Expression::Path(path_expr(&["x"]))),
+                brace_token: Brace::new(
+                    Token::Symbol(Symbol::LBrace).into(),
+                    Token::Symbol(Symbol::RBrace).into(),
+                ),
+                arms: {
+                    let mut arms = vec![];
+                    arms.push(MatchArm {
+                        pat: Literal::Integer(1).into(),
+                        guard: None,
+                        fat_arrow_token: Token::Symbol(Symbol::FatArrow).into(),
+                        body: Box::new(Expression::Literal(LiteralExpression {
+                            lit: Literal::Bool(true).into(),
+                        })),
+                        comma_token: Some(Token::Symbol(Symbol::Comma).into()),
+                    });
+                    arms.push(MatchArm {
+                        pat: WildcardPattern::new(Token::Symbol(Symbol::Underscore).into()).into(),
+                        guard: None,
+                        fat_arrow_token: Token::Symbol(Symbol::FatArrow).into(),
+                        body: Box::new(Expression::Literal(LiteralExpression {
+                            lit: Literal::Bool(false).into(),
+                        })),
+                        comma_token: Some(Token::Symbol(Symbol::Comma).into()),
+                    });
+                    arms
+                },
+            })
+        );
     }
 
     #[test]
-    fn test_error_handling() {
-        assert!(parse_expr("1 +").is_err());
-        assert!(parse_expr("if x {").is_err());
-        assert!(parse_expr("match x { 1 =>").is_err());
-    }
-
-    #[test]
-    fn test_operator_precedence() {
-        // 乘法优先级高于加法
-        assert!(parse_expr("1 + 2 * 3").is_ok());
-        assert!(parse_expr("1 * 2 + 3").is_ok());
-
-        // 比较运算符优先级高于逻辑运算符
-        assert!(parse_expr("a == b && c != d").is_ok());
-        assert!(parse_expr("x > y || z < w").is_ok());
-
-        // 一元运算符优先级最高
-        assert!(parse_expr("-a * b").is_ok());
-        assert!(parse_expr("!flag && condition").is_ok());
-    }
-
-    #[test]
-    fn test_range_expressions() {
-        // 各种范围表达式形式
-        assert!(parse_expr("1..10").is_ok());
-        assert!(parse_expr("1..=10").is_ok());
-        assert!(parse_expr("..10").is_ok());
-        assert!(parse_expr("1..").is_ok());
-        assert!(parse_expr("..").is_ok());
-
-        // 范围表达式在复杂表达式中的使用
-        assert!(parse_expr("for i in 0..10 { i }").is_ok());
-        assert!(parse_expr("x >= 1..10").is_ok());
-    }
-
-    #[test]
-    fn test_complex_expressions() {
-        // 嵌套表达式
-        assert!(parse_expr("(1 + 2) * (3 - 4)").is_ok());
-        assert!(parse_expr("a + b * c - d / e").is_ok());
-
-        // 混合运算符
-        assert!(parse_expr("a && b || c && d").is_ok());
-        assert!(parse_expr("x == y && z != w").is_ok());
-
-        // // 函数调用与运算符组合
-        // assert!(parse_expr("foo() + bar()").is_ok());
-        let ret = parse_expr("a.method() * 2");
-
-        assert!(ret.is_ok());
-    }
-
-    #[test]
-    fn test_assignment_expressions() {
-        // 各种赋值表达式
-        assert!(parse_expr("x = 1").is_ok());
-        assert!(parse_expr("y += 2").is_ok());
-        assert!(parse_expr("z *= a + b").is_ok());
-    }
-
-    #[test]
-    fn test_field_and_method_access() {
-        // 字段访问
-        assert!(parse_expr("obj.field").is_ok());
-
-        let ret = parse_expr("object.field.method()");
-
-        assert!(ret.is_ok());
-
-        // 方法调用
-        assert!(parse_expr("obj.method()").is_ok());
-        assert!(parse_expr("obj.method(arg1, arg2)").is_ok());
-    }
-
-    #[test]
-    fn test_array_and_index_expressions() {
-        // 数组表达式
-        assert!(parse_expr("[1, 2, 3]").is_ok());
-        assert!(parse_expr("[0; 10]").is_ok());
-
-        // 索引访问
-        assert!(parse_expr("arr[0]").is_ok());
-        assert!(parse_expr("matrix[1][2]").is_ok());
-    }
-
-    #[test]
-    fn test_closure_expressions() {
-        // 闭包表达式
-        assert!(parse_expr("|| x + 1").is_ok());
-        assert!(parse_expr("|x| x * 2").is_ok());
-        assert!(parse_expr("|x, y| x + y").is_ok());
-        assert!(parse_expr("|| { x + 1 }").is_ok());
+    fn test_block_expression() {
+        assert_expr_eq!(
+            "{ let x = 1; x }",
+            Expression::Block(BlockExpression {
+                brace_token: Brace::new(
+                    Token::Symbol(Symbol::LBrace).into(),
+                    Token::Symbol(Symbol::RBrace).into(),
+                ),
+                stmts: vec![
+                    Statement::Let(LetStatement {
+                        let_token: Token::Keyword(Keyword::Let).into(),
+                        pattern: Identifier::new("x").into(),
+                        type_annotation: None,
+                        initializer: Some((
+                            Token::Symbol(Symbol::Eq).into(),
+                            Box::new(Expression::Literal(LiteralExpression {
+                                lit: Literal::Integer(1).into(),
+                            })),
+                        )),
+                        semi_token: Token::Symbol(Symbol::Semi).into(),
+                    }),
+                    Statement::Expression(ExpressionStatement {
+                        expr: Expression::Path(path_expr(&["x"])),
+                        semi_token: None,
+                    }),
+                ],
+            })
+        );
     }
 }

@@ -1,6 +1,8 @@
-use super::{BinOp, Path, Pattern, RangeLimits, Statement, Type, UnOp};
+use super::{BinOp, PathInExpression, Pattern, RangeLimits, Statement, Type, UnOp};
 use crate::diagnostic::{HasSpan, Span, Spanned};
-use crate::lexical::{Brace, Bracket, IdentSpan, LiteralSpan, Paren, Punctuated, TokenSpan};
+use crate::lexical::{
+    Brace, Bracket, IdentSpan, Literal, LiteralSpan, Paren, Punctuated, TokenSpan,
+};
 
 /// Expression 是一种用于计算值的语法结构
 ///
@@ -15,7 +17,7 @@ use crate::lexical::{Brace, Bracket, IdentSpan, LiteralSpan, Paren, Punctuated, 
 /// Expression 表示Rust语言中的表达式，严格遵循官方规范
 ///
 /// 参考：https://doc.rust-lang.org/reference/expressions.html
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Expression {
     /// 字面量表达式 (LiteralExpression)
     Literal(LiteralExpression),
@@ -71,6 +73,174 @@ pub enum Expression {
     Async(AsyncBlockExpression),
 }
 
+impl From<LiteralExpression> for Expression {
+    fn from(expr: LiteralExpression) -> Self {
+        Expression::Literal(expr)
+    }
+}
+
+impl From<PathExpression> for Expression {
+    fn from(expr: PathExpression) -> Self {
+        Expression::Path(expr)
+    }
+}
+
+impl From<OperatorExpression> for Expression {
+    fn from(expr: OperatorExpression) -> Self {
+        Expression::Operator(expr)
+    }
+}
+
+impl From<GroupedExpression> for Expression {
+    fn from(expr: GroupedExpression) -> Self {
+        Expression::Grouped(expr)
+    }
+}
+
+impl From<ArrayExpression> for Expression {
+    fn from(expr: ArrayExpression) -> Self {
+        Expression::Array(expr)
+    }
+}
+
+impl From<AwaitExpression> for Expression {
+    fn from(expr: AwaitExpression) -> Self {
+        Expression::Await(expr)
+    }
+}
+
+impl From<IndexExpression> for Expression {
+    fn from(expr: IndexExpression) -> Self {
+        Expression::Index(expr)
+    }
+}
+
+impl From<TupleExpression> for Expression {
+    fn from(expr: TupleExpression) -> Self {
+        Expression::Tuple(expr)
+    }
+}
+
+impl From<TupleIndexingExpression> for Expression {
+    fn from(expr: TupleIndexingExpression) -> Self {
+        Expression::TupleIndex(expr)
+    }
+}
+
+impl From<StructExpression> for Expression {
+    fn from(expr: StructExpression) -> Self {
+        Expression::Struct(expr)
+    }
+}
+
+impl From<CallExpression> for Expression {
+    fn from(expr: CallExpression) -> Self {
+        Expression::Call(expr)
+    }
+}
+
+impl From<MethodCallExpression> for Expression {
+    fn from(expr: MethodCallExpression) -> Self {
+        Expression::MethodCall(expr)
+    }
+}
+
+impl From<FieldExpression> for Expression {
+    fn from(expr: FieldExpression) -> Self {
+        Expression::Field(expr)
+    }
+}
+
+impl From<ClosureExpression> for Expression {
+    fn from(expr: ClosureExpression) -> Self {
+        Expression::Closure(expr)
+    }
+}
+
+impl From<ContinueExpression> for Expression {
+    fn from(expr: ContinueExpression) -> Self {
+        Expression::Continue(expr)
+    }
+}
+
+impl From<BreakExpression> for Expression {
+    fn from(expr: BreakExpression) -> Self {
+        Expression::Break(expr)
+    }
+}
+
+impl From<RangeExpression> for Expression {
+    fn from(expr: RangeExpression) -> Self {
+        Expression::Range(expr)
+    }
+}
+
+impl From<ReturnExpression> for Expression {
+    fn from(expr: ReturnExpression) -> Self {
+        Expression::Return(expr)
+    }
+}
+
+impl From<UnderscoreExpression> for Expression {
+    fn from(expr: UnderscoreExpression) -> Self {
+        Expression::Underscore(expr)
+    }
+}
+
+impl From<BlockExpression> for Expression {
+    fn from(expr: BlockExpression) -> Self {
+        Expression::Block(expr)
+    }
+}
+
+impl From<LoopExpression> for Expression {
+    fn from(expr: LoopExpression) -> Self {
+        Expression::Loop(expr)
+    }
+}
+
+impl From<WhileLoopExpression> for Expression {
+    fn from(expr: WhileLoopExpression) -> Self {
+        Expression::While(expr)
+    }
+}
+
+impl From<ForLoopExpression> for Expression {
+    fn from(expr: ForLoopExpression) -> Self {
+        Expression::For(expr)
+    }
+}
+
+impl From<IfExpression> for Expression {
+    fn from(expr: IfExpression) -> Self {
+        Expression::If(expr)
+    }
+}
+
+impl From<MatchExpression> for Expression {
+    fn from(expr: MatchExpression) -> Self {
+        Expression::Match(expr)
+    }
+}
+
+impl From<AsyncBlockExpression> for Expression {
+    fn from(expr: AsyncBlockExpression) -> Self {
+        Expression::Async(expr)
+    }
+}
+
+impl From<Literal> for Expression {
+    fn from(lit: Literal) -> Self {
+        Expression::Literal(LiteralExpression { lit: lit.into() })
+    }
+}
+
+impl From<PathInExpression> for Expression {
+    fn from(path: PathInExpression) -> Self {
+        Expression::Path(PathExpression { path })
+    }
+}
+
 impl Expression {
     pub fn span(&self) -> Span {
         match self {
@@ -124,51 +294,6 @@ impl Expression {
 impl HasSpan for Expression {
     fn span(&self) -> Span {
         self.span()
-    }
-}
-
-impl PartialEq for Expression {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Expression::Literal(a), Expression::Literal(b)) => a.lit.value() == b.lit.value(),
-            (Expression::Path(a), Expression::Path(b)) => a.path == b.path,
-            (Expression::Underscore(_), Expression::Underscore(_)) => true,
-            (Expression::Grouped(a), Expression::Grouped(b)) => a.expr == b.expr,
-            (Expression::Tuple(a), Expression::Tuple(b)) => a.elems == b.elems,
-            (Expression::Array(a), Expression::Array(b)) => a == b,
-            (Expression::Block(a), Expression::Block(b)) => a.stmts == b.stmts,
-            (Expression::If(a), Expression::If(b)) => {
-                a.cond == b.cond && a.then_branch == b.then_branch && a.else_branch == b.else_branch
-            }
-            (Expression::While(a), Expression::While(b)) => a.cond == b.cond && a.body == b.body,
-            (Expression::Loop(a), Expression::Loop(b)) => a.body == b.body,
-            (Expression::For(a), Expression::For(b)) => {
-                a.pat == b.pat && a.expr == b.expr && a.body == b.body
-            }
-            (Expression::Break(a), Expression::Break(b)) => a.expr == b.expr,
-            (Expression::Continue(_), Expression::Continue(_)) => true,
-            (Expression::Return(a), Expression::Return(b)) => a.expr == b.expr,
-            (Expression::Match(a), Expression::Match(b)) => a.expr == b.expr && a.arms == b.arms,
-            (Expression::Async(a), Expression::Async(b)) => a.block == b.block,
-            (Expression::Closure(a), Expression::Closure(b)) => {
-                a.inputs == b.inputs && a.output == b.output && a.body == b.body
-            }
-            (Expression::Operator(a), Expression::Operator(b)) => a == b,
-            (Expression::Field(a), Expression::Field(b)) => a.expr == b.expr && a.field == b.field,
-            (Expression::MethodCall(a), Expression::MethodCall(b)) => {
-                a.expr == b.expr && a.method == b.method && a.args == b.args
-            }
-            (Expression::Call(a), Expression::Call(b)) => a.expr == b.expr && a.args == b.args,
-            (Expression::Index(a), Expression::Index(b)) => a.expr == b.expr && a.index == b.index,
-            (Expression::Await(a), Expression::Await(b)) => a.expr == b.expr,
-            (Expression::TupleIndex(a), Expression::TupleIndex(b)) => {
-                a.expr == b.expr && a.index == b.index
-            }
-            (Expression::Range(a), Expression::Range(b)) => {
-                a.start == b.start && a.end == b.end && a.limits == b.limits
-            }
-            _ => false,
-        }
     }
 }
 
@@ -505,6 +630,12 @@ pub struct LiteralExpression {
 }
 
 impl LiteralExpression {
+    pub fn new(lit: LiteralSpan) -> Self {
+        LiteralExpression { lit }
+    }
+}
+
+impl LiteralExpression {
     pub fn span(&self) -> Span {
         self.lit.span()
     }
@@ -516,6 +647,12 @@ impl HasSpan for LiteralExpression {
     }
 }
 
+impl From<Literal> for LiteralExpression {
+    fn from(value: Literal) -> Self {
+        LiteralExpression::new(value.into())
+    }
+}
+
 /// 路径表达式
 ///
 /// 根据Rust规范文档，路径表达式用于引用项、变量、函数等
@@ -523,7 +660,7 @@ impl HasSpan for LiteralExpression {
 /// 参考：https://doc.rust-lang.org/reference/expressions/path-expr.html
 #[derive(Debug, PartialEq)]
 pub struct PathExpression {
-    pub path: Path,
+    pub path: PathInExpression,
 }
 
 impl PathExpression {
@@ -571,9 +708,9 @@ impl HasSpan for AwaitExpression {
 /// 参考：https://doc.rust-lang.org/reference/expressions/struct-expr.html
 #[derive(Debug, PartialEq)]
 pub struct StructExpression {
-    pub path: Path,
+    pub path: PathInExpression,
     pub brace_token: Brace,
-    pub fields: Punctuated<FieldInitializer>,
+    pub fields: Punctuated<StructExprField>,
     pub rest: Option<(TokenSpan, Box<Expression>)>, // (.., expr)
 }
 
@@ -620,19 +757,26 @@ impl HasSpan for AsyncBlockExpression {
 ///
 /// 参考：https://doc.rust-lang.org/reference/expressions/struct-expr.html
 #[derive(Debug, PartialEq)]
-pub struct FieldInitializer {
+pub struct StructExprField {
     pub member: IdentSpan,
     pub colon_token: Option<TokenSpan>,
-    pub expr: Box<Expression>,
+    pub expr: Option<Box<Expression>>,
 }
 
-impl FieldInitializer {
+impl StructExprField {
     pub fn span(&self) -> Span {
-        Span::new(self.member.span().start, self.expr.span().end)
+        Span::new(
+            self.member.span().start,
+            self.expr
+                .as_ref()
+                .map(|e| e.span())
+                .unwrap_or(self.member.span())
+                .end,
+        )
     }
 }
 
-impl HasSpan for FieldInitializer {
+impl HasSpan for StructExprField {
     fn span(&self) -> Span {
         self.span()
     }
@@ -974,7 +1118,7 @@ impl HasSpan for RangeExpression {
 pub struct ClosureExpression {
     pub move_token: Option<TokenSpan>,
     pub or_token: (TokenSpan, TokenSpan), // (|, |)
-    pub inputs: Punctuated<Pattern>,
+    pub inputs: Punctuated<ClosureParam>,
     pub output: Option<(TokenSpan, Box<Type>)>, // (-> token, type)
     pub body: Box<Expression>,
 }
@@ -992,6 +1136,32 @@ impl ClosureExpression {
 }
 
 impl HasSpan for ClosureExpression {
+    fn span(&self) -> Span {
+        self.span()
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub struct ClosureParam {
+    pub pattern: Pattern,
+    pub colon_token: Option<TokenSpan>,
+    pub ty: Option<Box<Type>>,
+}
+
+impl ClosureParam {
+    pub fn span(&self) -> Span {
+        let start = self.pattern.span().start;
+        let end = if let Some(ty) = &self.ty {
+            ty.span().end
+        } else {
+            self.pattern.span().end
+        };
+
+        Span::new(start, end)
+    }
+}
+
+impl HasSpan for ClosureParam {
     fn span(&self) -> Span {
         self.span()
     }

@@ -1,40 +1,39 @@
-use std::{fmt, str::FromStr};
 use crate::diagnostic::Spanned;
+use std::{fmt, str::FromStr};
 
 pub type SymbolSpan = Spanned<Symbol>;
-
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum Symbol {
     // 单字符标点
-    Eq,    // =
-    Lt,    // <
-    Gt,    // >
-    Not,   // !
-    Tilde, // ~
-    Plus,  // +
-    Minus, // -
-    Star,  // *
-    Slash, // /
-    Percent, // %
-    Caret, // ^
-    And,   // &
-    Or,    // |
-    At,    // @
-    Dot,   // .
-    Comma, // ,
-    Semi,  // ;
-    Colon, // :
-    Pound, // #
-    Dollar, // $
-    Question, // ?
+    Eq,         // =
+    Lt,         // <
+    Gt,         // >
+    Not,        // !
+    Tilde,      // ~
+    Plus,       // +
+    Minus,      // -
+    Star,       // *
+    Slash,      // /
+    Percent,    // %
+    Caret,      // ^
+    And,        // &
+    Or,         // |
+    At,         // @
+    Dot,        // .
+    Comma,      // ,
+    Semi,       // ;
+    Colon,      // :
+    Pound,      // #
+    Dollar,     // $
+    Question,   // ?
     Underscore, // _
-    LBrace, // {
-    RBrace, // }
-    LBracket, // [
-    RBracket, // ]
-    LParen, // (
-    RParen, // )
+    LBrace,     // {
+    RBrace,     // }
+    LBracket,   // [
+    RBracket,   // ]
+    LParen,     // (
+    RParen,     // )
 
     // 多字符标点
     Le,         // <=
@@ -45,26 +44,24 @@ pub enum Symbol {
     OrOr,       // ||
     Shl,        // <<
     Shr,        // >>
-    PlusEq,    // +=
-    MinusEq,   // -=
-    StarEq,    // *=
-    SlashEq,   // /=
-    PercentEq, // %=
-    CaretEq,   // ^=
-    AndEq,     // &=
-    OrEq,      // |=
-    ShlEq,     // <<=
-    ShrEq,     // >>=
+    PlusEq,     // +=
+    MinusEq,    // -=
+    StarEq,     // *=
+    SlashEq,    // /=
+    PercentEq,  // %=
+    CaretEq,    // ^=
+    AndEq,      // &=
+    OrEq,       // |=
+    ShlEq,      // <<=
+    ShrEq,      // >>=
     DotDot,     // ..
     DotDotDot,  // ...
     DotDotEq,   // ..=
     ColonColon, // ::
     RArrow,     // ->
     LArrow,     // <-
-    FatArrow    // =>
+    FatArrow,   // =>
 }
-
-
 
 impl Symbol {
     pub fn from_str(s: &str) -> Option<Self> {
@@ -98,7 +95,7 @@ impl Symbol {
             "]" => Some(Symbol::RBracket),
             "(" => Some(Symbol::LParen),
             ")" => Some(Symbol::RParen),
-            
+
             // 多字符 (严格按规范顺序)
             "<=" => Some(Symbol::Le),
             "==" => Some(Symbol::EqEq),
@@ -125,8 +122,8 @@ impl Symbol {
             "->" => Some(Symbol::RArrow),
             "<-" => Some(Symbol::LArrow),
             "=>" => Some(Symbol::FatArrow),
-            
-            _ => None
+
+            _ => None,
         }
     }
 
@@ -161,7 +158,7 @@ impl Symbol {
             Symbol::RBracket => "]",
             Symbol::LParen => "(",
             Symbol::RParen => ")",
-            
+
             // 多字符
             Symbol::Le => "<=",
             Symbol::EqEq => "==",
@@ -187,7 +184,7 @@ impl Symbol {
             Symbol::ColonColon => "::",
             Symbol::RArrow => "->",
             Symbol::LArrow => "<-",
-            Symbol::FatArrow => "=>"
+            Symbol::FatArrow => "=>",
         }
     }
 }
@@ -197,4 +194,3 @@ impl fmt::Display for Symbol {
         write!(f, "{}", self.as_str())
     }
 }
-

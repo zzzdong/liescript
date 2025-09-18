@@ -4,7 +4,7 @@ use super::ident::Identifier;
 use super::keyword::Keyword;
 use super::literal::Literal;
 use super::symbol::Symbol;
-use crate::diagnostic::{Span, Spanned};
+use crate::diagnostic::{HasSpan, Span, Spanned};
 
 #[macro_export]
 macro_rules! token {
@@ -248,9 +248,26 @@ impl Brace {
     }
 }
 
+/// `<>`
+#[derive(Debug, PartialEq)]
+pub struct Angle {
+    pub open: TokenSpan,
+    pub close: TokenSpan,
+}
+
+impl Angle {
+    pub fn new(open: TokenSpan, close: TokenSpan) -> Self {
+        Self { open, close }
+    }
+
+    pub fn span(&self) -> Span {
+        Span::new(self.open.span().start, self.close.span().end)
+    }
+}
+
 pub trait Bracketed {
     type Output;
-    
+
     fn bracketed(open: TokenSpan, close: TokenSpan) -> Self::Output;
 }
 
@@ -277,7 +294,6 @@ impl Bracketed for Brace {
         Self::new(open, close)
     }
 }
-
 
 #[derive(Debug, PartialEq)]
 pub struct Punctuated<T> {
@@ -311,9 +327,13 @@ impl<T> Punctuated<T> {
             None => self.items.last().map(|(item, _)| item),
         }
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty() && self.last.is_none()
+    }
 }
 
-impl<T> Punctuated<Spanned<T>> {
+impl<T: HasSpan> Punctuated<T> {
     pub fn span(&self) -> Span {
         let span = match (self.items.first(), self.items.last()) {
             (Some((start, _)), Some((_, end))) => Span::new(start.span().start, end.span().end),
@@ -325,6 +345,16 @@ impl<T> Punctuated<Spanned<T>> {
             Some(last) => Span::new(span.start, last.span().end),
             None => span,
         }
+    }
+}
+
+impl<T: HasSpan> HasSpan for Punctuated<T> {
+    fn span(&self) -> Span {
+        self.items
+            .iter()
+            .map(|(item, _)| item.span())
+            .chain(self.last.iter().map(|item| item.span()))
+            .fold(Span::default(), |span, item| span.join(item))
     }
 }
 

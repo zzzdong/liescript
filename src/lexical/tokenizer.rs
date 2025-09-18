@@ -197,6 +197,7 @@ impl<'i> Tokenizer<'i> {
         let got = self.eat_while(|c| c.is_ascii_alphanumeric() || c == '_');
 
         let token = match got {
+            "_" => Token::Symbol(Symbol::Underscore),
             "true" => Token::Literal(Literal::Bool(true)),
             "false" => Token::Literal(Literal::Bool(false)),
             kw if Keyword::STRS.contains(&kw) => {
@@ -465,6 +466,7 @@ impl<'i> Tokenizer<'i> {
             '?' => Some(Symbol::Question),
             '=' => Some(Symbol::Eq),
             '.' => Some(Symbol::Dot),
+            '_' => Some(Symbol::Underscore),
             _ => None,
         };
 

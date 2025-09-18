@@ -4,9 +4,9 @@ use crate::lexical::{
     Brace, Bracket, IdentSpan, Keyword, Literal, LiteralSpan, Paren, Punctuated, Symbol, Token,
     TokenSpan,
 };
+use crate::syntax::PathInExpression;
 use crate::syntax::{
     expressions::{Expression, LiteralExpression, PathExpression},
-    names::{Path, PathSegment},
     patterns::*,
 };
 
@@ -28,23 +28,12 @@ impl Parse for Pattern {
             return Ok(Pattern::Literal(pat));
         }
 
+        // TODO: 添加范围模式解析
         // 3. 尝试解析标识符模式 (可能是范围模式的一部分)
         if let Some(pat) = stream.try_parse(parse_identifier_pattern) {
             // 检查是否是范围模式的一部分 (如 x..y)
             if stream.next_is(Symbol::DotDot) || stream.next_is(Symbol::DotDotEq) {
-                let path = Path {
-                    leading_colon: None,
-                    segments: Punctuated {
-                        items: vec![(
-                            PathSegment { ident: pat.ident },
-                            TokenSpan {
-                                value: Token::Symbol(Symbol::Colon),
-                                span: Span::default(),
-                            },
-                        )],
-                        last: None,
-                    },
-                };
+                let path = PathInExpression::parse(stream)?;
                 let lo = Box::new(Expression::Path(PathExpression { path }));
                 return parse_range_pattern_rest(stream, lo);
             }
@@ -61,24 +50,24 @@ impl Parse for Pattern {
             return Ok(Pattern::Rest(pat));
         }
 
-        // 6. 尝试解析结构体模式 Point { x, y }
-        if let Some(pat) = stream.try_parse(parse_struct_pattern) {
-            return Ok(Pattern::Struct(pat));
-        }
-
-        // 7. 尝试解析元组结构体模式 Some(x)
-        if let Some(pat) = stream.try_parse(parse_tuple_struct_pattern) {
-            return Ok(Pattern::TupleStruct(pat));
-        }
-
-        // 8. 尝试解析元组模式 (x, y)
+        // 6. 尝试解析元组模式 (x, y)
         if let Some(pat) = stream.try_parse(parse_tuple_pattern) {
             return Ok(Pattern::Tuple(pat));
         }
 
-        // 9. 尝试解析分组模式 (x | y)
+        // 7. 尝试解析分组模式 (x | y)
         if let Some(pat) = stream.try_parse(parse_grouped_pattern) {
             return Ok(Pattern::Grouped(pat));
+        }
+
+        // 8. 尝试解析元组结构体模式 Some(x)
+        if let Some(pat) = stream.try_parse(parse_tuple_struct_pattern) {
+            return Ok(Pattern::TupleStruct(pat));
+        }
+
+        // 9. 尝试解析结构体模式 Point { x, y }
+        if let Some(pat) = stream.try_parse(parse_struct_pattern) {
+            return Ok(Pattern::Struct(pat));
         }
 
         // 10. 尝试解析切片模式 [x, y]
@@ -187,7 +176,7 @@ fn parse_reference_pattern(stream: &mut ParseStream) -> Result<ReferencePattern,
 
 /// 解析结构体模式
 fn parse_struct_pattern(stream: &mut ParseStream) -> Result<StructPattern, ParseError> {
-    let path = Path::parse(stream)?;
+    let path = PathInExpression::parse(stream)?;
     let brace_token = stream.expect_symbol(Symbol::LBrace)?;
 
     let mut fields = Vec::new();
@@ -255,7 +244,7 @@ fn parse_field_pattern(stream: &mut ParseStream) -> Result<FieldPattern, ParseEr
 
 /// 解析元组结构体模式
 fn parse_tuple_struct_pattern(stream: &mut ParseStream) -> Result<TupleStructPattern, ParseError> {
-    let path = Path::parse(stream)?;
+    let path = PathInExpression::parse(stream)?;
     let open_paren = stream.expect_symbol(Symbol::LParen)?;
 
     let comma_token = Token::Symbol(Symbol::Comma);
@@ -326,6 +315,6 @@ fn parse_slice_pattern(stream: &mut ParseStream) -> Result<SlicePattern, ParseEr
 
 /// 解析路径模式
 fn parse_path_pattern(stream: &mut ParseStream) -> Result<PathPattern, ParseError> {
-    let path = Path::parse(stream)?;
+    let path = PathInExpression::parse(stream)?;
     Ok(PathPattern { path })
 }

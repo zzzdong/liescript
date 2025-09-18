@@ -1,4 +1,8 @@
-use std::{borrow::Cow, fmt::{Debug, Display}, iter::Peekable};
+use std::{
+    borrow::Cow,
+    fmt::{Debug, Display},
+    iter::Peekable,
+};
 
 use crate::{
     diagnostic::{Span, Spanned},
@@ -67,8 +71,8 @@ impl ParseError {
         self
     }
 
-    pub fn with_expected(mut self, expected: impl Into<String>) -> Self {
-        self.expected.push(expected.into());
+    pub fn with_expected(mut self, expected: impl Display) -> Self {
+        self.expected.push(expected.to_string());
         self
     }
 
@@ -133,6 +137,10 @@ impl<'i> ParseStream<'i> {
 
     pub fn peek(&mut self) -> Option<&TokenSpan> {
         self.iter.peek().cloned()
+    }
+
+    pub fn peek_token(&mut self) -> Option<&Token> {
+        self.iter.peek().map(|p| p.value())
     }
 
     pub fn is_empty(&mut self) -> bool {

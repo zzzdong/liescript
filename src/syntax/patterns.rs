@@ -1,7 +1,9 @@
-use super::{expressions::Expression, names::Path};
+use super::expressions::Expression;
 use crate::diagnostic::{HasSpan, Span, Spanned};
-use crate::lexical::{Brace, Bracket, IdentSpan, LiteralSpan, Paren, Punctuated, TokenSpan};
-
+use crate::lexical::{
+    Brace, Bracket, IdentSpan, Identifier, Literal, LiteralSpan, Paren, Punctuated, TokenSpan,
+};
+use crate::syntax::PathInExpression;
 
 /// Pattern 是一种用于匹配值结构的语法结构
 ///
@@ -195,6 +197,46 @@ impl HasSpan for Pattern {
     }
 }
 
+impl From<LiteralSpan> for Pattern {
+    fn from(lit: LiteralSpan) -> Self {
+        Pattern::Literal(LiteralPattern { lit })
+    }
+}
+
+impl From<Literal> for Pattern {
+    fn from(lit: Literal) -> Self {
+        Pattern::Literal(LiteralPattern { lit: lit.into() })
+    }
+}
+
+impl From<IdentSpan> for Pattern {
+    fn from(ident: IdentSpan) -> Self {
+        Pattern::Identifier(IdentifierPattern {
+            ident,
+            by_ref: None,
+            is_mut: None,
+            subpat: None,
+        })
+    }
+}
+
+impl From<Identifier> for Pattern {
+    fn from(ident: Identifier) -> Self {
+        Pattern::Identifier(IdentifierPattern {
+            ident: ident.into(),
+            by_ref: None,
+            is_mut: None,
+            subpat: None,
+        })
+    }
+}
+
+impl From<WildcardPattern> for Pattern {
+    fn from(pat: WildcardPattern) -> Self {
+        Pattern::Wildcard(pat)
+    }
+}
+
 /// 字面量模式
 #[derive(Debug, PartialEq)]
 pub struct LiteralPattern {
@@ -256,6 +298,10 @@ pub struct WildcardPattern {
 }
 
 impl WildcardPattern {
+    pub fn new(underscore_token: TokenSpan) -> Self {
+        WildcardPattern { underscore_token }
+    }
+
     pub fn span(&self) -> Span {
         self.underscore_token.span()
     }
@@ -310,7 +356,7 @@ impl HasSpan for ReferencePattern {
 /// 结构体模式
 #[derive(Debug, PartialEq)]
 pub struct StructPattern {
-    pub path: Path,
+    pub path: PathInExpression,
     pub brace_token: Brace,
     pub fields: Punctuated<FieldPattern>,
     pub rest: Option<RestPattern>,
@@ -353,7 +399,7 @@ impl HasSpan for FieldPattern {
 /// 元组结构体模式
 #[derive(Debug, PartialEq)]
 pub struct TupleStructPattern {
-    pub path: Path,
+    pub path: PathInExpression,
     pub paren_token: Paren,
     pub elems: Punctuated<Pattern>,
 }
@@ -448,7 +494,7 @@ impl HasSpan for RestPattern {
 /// 路径模式
 #[derive(Debug, PartialEq)]
 pub struct PathPattern {
-    pub path: Path,
+    pub path: PathInExpression,
 }
 
 impl PathPattern {

@@ -1,6 +1,6 @@
 use std::{fmt, ops::Deref};
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct Spanned<T> {
     pub value: T,
     pub span: Span,
@@ -33,6 +33,12 @@ impl<T: fmt::Debug> fmt::Display for Spanned<T> {
     }
 }
 
+impl<T: PartialEq> PartialEq<Spanned<T>> for Spanned<T> {
+    fn eq(&self, other: &Spanned<T>) -> bool {
+        self.value == other.value
+    }
+}
+
 impl<T: PartialEq> PartialEq<T> for Spanned<T> {
     fn eq(&self, other: &T) -> bool {
         &self.value == other
@@ -50,6 +56,12 @@ impl<T> Deref for Spanned<T> {
 
     fn deref(&self) -> &Self::Target {
         &self.value
+    }
+}
+
+impl<T> From<T> for Spanned<T> {
+    fn from(value: T) -> Self {
+        Spanned::new(value, Span::dummy())
     }
 }
 
@@ -76,6 +88,24 @@ impl Span {
             start: self.start,
             end: other.end,
         }
+    }
+
+    pub fn contains(&self, pos: Pos) -> bool {
+        self.start <= pos && pos < self.end
+    }
+
+    pub fn split(&self, offset: usize) -> (Span, Span) {
+        let pos = self.start.with_added_offset(offset);
+        (
+            Span {
+                start: self.start,
+                end: pos,
+            },
+            Span {
+                start: pos,
+                end: self.end,
+            },
+        )
     }
 }
 
@@ -115,6 +145,14 @@ impl Pos {
             column: 1 + offset,
         }
     }
+
+    // Note: only use this when you know the offset is larger than the current column
+    pub(crate) fn with_added_offset(&self, offset: usize) -> Self {
+        let mut other = self.clone();
+        other.offset += offset;
+        other.column += offset;
+        other
+    }
 }
 
 impl Default for Pos {
@@ -128,7 +166,6 @@ impl Default for Pos {
 //         write!(f, "{}:{}:{}:{}", self.file, self.line, self.column, self.offset)
 //     }
 // }
-
 
 pub trait HasSpan {
     fn span(&self) -> Span;

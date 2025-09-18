@@ -4,27 +4,33 @@ use crate::lexical::{
     Brace, Bracket, IdentSpan, Keyword, Literal, LiteralSpan, Paren, Punctuated, Symbol, Token,
     TokenSpan,
 };
-use crate::syntax::{Expression, Path, Pattern, Statement, Type, Visibility, items::*};
+use crate::syntax::{
+    Expression, Pattern, SimplePath, Statement, Type, TypePath, Visibility, items::*,
+};
 
 // Item 相关的 Parse 实现
 impl Parse for Item {
     fn parse(stream: &mut ParseStream) -> Result<Self, ParseError> {
-        let peek = stream.peek().ok_or(ParseError::eof())?;
+        parse_item(stream)
+    }
+}
 
-        match peek.value() {
-            Token::Keyword(Keyword::Fn) => parse_function(stream).map(Item::Function),
-            Token::Keyword(Keyword::Struct) => parse_struct(stream).map(Item::Struct),
-            Token::Keyword(Keyword::Enum) => parse_enum(stream).map(Item::Enum),
-            Token::Keyword(Keyword::Type) => parse_type_alias(stream).map(Item::TypeAlias),
-            Token::Keyword(Keyword::Const) => parse_const(stream).map(Item::Const),
-            Token::Keyword(Keyword::Static) => parse_static(stream).map(Item::Static),
-            Token::Keyword(Keyword::Mod) => parse_module(stream).map(Item::Module),
-            Token::Keyword(Keyword::Use) => parse_use(stream).map(Item::Use),
+fn parse_item(stream: &mut ParseStream) -> Result<Item, ParseError> {
+    let peek = stream.peek().ok_or(ParseError::eof())?;
 
-            _ => Err(ParseError::new(
-                "expected an item declaration (function, struct, enum, type, const, static, mod, or use)",
-            )),
-        }
+    match peek.value() {
+        Token::Keyword(Keyword::Fn) => parse_function(stream).map(Item::Function),
+        Token::Keyword(Keyword::Struct) => parse_struct(stream).map(Item::Struct),
+        Token::Keyword(Keyword::Enum) => parse_enum(stream).map(Item::Enum),
+        Token::Keyword(Keyword::Type) => parse_type_alias(stream).map(Item::TypeAlias),
+        Token::Keyword(Keyword::Const) => parse_const(stream).map(Item::Const),
+        Token::Keyword(Keyword::Static) => parse_static(stream).map(Item::Static),
+        Token::Keyword(Keyword::Mod) => parse_module(stream).map(Item::Module),
+        Token::Keyword(Keyword::Use) => parse_use(stream).map(Item::Use),
+
+        _ => Err(ParseError::new(
+            "expected an item declaration (function, struct, enum, type, const, static, mod, or use)",
+        )),
     }
 }
 
@@ -108,7 +114,7 @@ fn parse_generic_param(stream: &mut ParseStream) -> Result<GenericParam, ParseEr
 
 /// 解析类型参数约束
 fn parse_type_param_bound(stream: &mut ParseStream) -> Result<TypeParamBound, ParseError> {
-    let path = Path::parse(stream)?;
+    let path = TypePath::parse(stream)?;
     Ok(TypeParamBound::Trait(TraitBound { path }))
 }
 
@@ -426,69 +432,393 @@ fn parse_use(stream: &mut ParseStream) -> Result<UseItem, ParseError> {
 
 /// 解析导入树
 fn parse_use_tree(stream: &mut ParseStream) -> Result<UseTree, ParseError> {
-    // 解析通配符导入 (::*)
     if stream.next_is(Symbol::Star) {
         let star_token = stream.expect_symbol(Symbol::Star)?;
         return Ok(UseTree::Glob(UseGlobTree {
             prefix: None,
-            colon_colon: None,
             star_token,
         }));
     }
 
     // 解析路径
-    let path = Path::parse(stream)?;
+    let path = SimplePath::parse(stream)?;
 
-    // 解析 ::* 或 ::{...}
-    if stream.next_is(Symbol::ColonColon) {
-        let colon_colon = stream.expect_symbol(Symbol::ColonColon)?;
-
-        if stream.next_is(Symbol::Star) {
-            let star_token = stream.expect_symbol(Symbol::Star)?;
-            return Ok(UseTree::Glob(UseGlobTree {
-                prefix: Some(path),
-                colon_colon: Some(colon_colon),
-                star_token,
+    if !path.is_ends_with_colon() {
+        if stream.next_is(Keyword::As) {
+            let as_token = stream.expect(&Token::Keyword(Keyword::As))?;
+            let rename = IdentSpan::parse(stream)?;
+            return Ok(UseTree::Rename(UseRenameTree {
+                path,
+                as_token,
+                rename,
             }));
         }
 
-        if stream.next_is(Symbol::LBrace) {
-            let open = stream.expect_symbol(Symbol::LBrace)?;
-            let items = stream
-                .parse_punctuated_with(|s| parse_use_tree(s), &Token::Symbol(Symbol::Comma))?;
-            let close = stream.expect_symbol(Symbol::RBrace)?;
-            return Ok(UseTree::Group(UseGroupTree {
-                brace_token: Brace::new(open, close),
-                items,
-            }));
-        }
+        return Ok(UseTree::Path(path));
     }
 
-    // 解析 as 重命名
-    if stream.next_is(Keyword::As) {
-        let as_token = stream.expect(&Token::Keyword(Keyword::As))?;
-        let rename = IdentSpan::parse(stream)?;
+    // when path ends with ::, maybe it's a glob import or a group import, e.g. `use std::*`, `use std::{...}`
 
-        // 从 path 中提取最后一个 ident 作为 name
-        let last_segment = path
-            .segments
-            .last()
-            .ok_or_else(|| ParseError::new("expected at least one segment in path"))?
-            .clone();
-
-        let name = last_segment.ident.clone();
-
-        return Ok(UseTree::Rename(UseRenameTree {
-            name,
-            as_token,
-            rename,
+    if stream.next_is(Symbol::Star) {
+        let star_token = stream.expect_symbol(Symbol::Star)?;
+        return Ok(UseTree::Glob(UseGlobTree {
+            prefix: Some(path),
+            star_token,
         }));
     }
 
-    // 普通路径导入
-    Ok(UseTree::Path(UsePathTree {
-        path,
-        colon_colon: None,
-        tree: None,
-    }))
+    if stream.next_is(Symbol::LBrace) {
+        let open = stream.expect_symbol(Symbol::LBrace)?;
+        let items = stream.parse_punctuated_with(parse_use_tree, &Token::Symbol(Symbol::Comma))?;
+        let close = stream.expect_symbol(Symbol::RBrace)?;
+        return Ok(UseTree::Group(UseGroupTree {
+            prefix: Some(path),
+            brace_token: Brace::new(open, close),
+            items,
+        }));
+    }
+
+    Err(ParseError::new("expected '*' or '{' after path")
+        .with_found(format!("{:?}", stream.peek())))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::diagnostic::{Span, Spanned};
+    use crate::lexical::{Identifier, Literal, Token, TokenStream};
+    use crate::syntax::{
+        BinOp, Expression, Pattern, Statement, Type, expressions::*, items::*,
+        patterns::IdentifierPattern, statements::ExpressionStatement, types::Primitive,
+    };
+    use crate::syntax::{PathExprSegment, PathIdentSegment, PathInExpression, SimplePathSegment};
+
+    /// 解析项并忽略Span信息进行比较
+    macro_rules! assert_item_eq {
+        ($input:literal, $expected:expr) => {{
+            let actual = parse_item($input).unwrap();
+            assert_eq!(actual, $expected);
+        }};
+    }
+
+    fn parse_item(input: &str) -> Result<Item, ParseError> {
+        let tokens = TokenStream::parse(input).unwrap();
+        let mut stream = ParseStream::new(&tokens);
+        Item::parse(&mut stream)
+    }
+
+    fn ident_pattern(name: &str) -> Pattern {
+        Pattern::Identifier(IdentifierPattern {
+            ident: Identifier::new(name).into(),
+            by_ref: None,
+            is_mut: None,
+            subpat: None,
+        })
+    }
+
+    fn literal_expr(value: i64) -> Expression {
+        Expression::Literal(LiteralExpression {
+            lit: Literal::Integer(value).into(),
+        })
+    }
+
+    fn path_expr(paths: &[&str]) -> PathExpression {
+        PathExpression { path: path(paths) }
+    }
+
+    fn path(paths: &[&str]) -> PathInExpression {
+        let mut segments = Punctuated::new();
+        if let Some((last, rest)) = paths.split_last() {
+            for path in rest {
+                segments.push(
+                    PathExprSegment {
+                        ident: PathIdentSegment::Ident(Identifier::new(path).into()),
+                        args: None,
+                    },
+                    Token::Symbol(Symbol::ColonColon).into(),
+                );
+            }
+            segments.push_last(PathExprSegment {
+                ident: PathIdentSegment::Ident(Identifier::new(last).into()),
+                args: None,
+            });
+        }
+
+        PathInExpression {
+            leading_colon: None,
+            segments,
+        }
+    }
+
+    fn simple_path(paths: &[&str]) -> SimplePath {
+        let mut segments = Punctuated::new();
+        if let Some((last, rest)) = paths.split_last() {
+            for path in rest {
+                segments.push(
+                    SimplePathSegment::Ident(Identifier::new(path).into()),
+                    Token::Symbol(Symbol::ColonColon).into(),
+                );
+            }
+            segments.push_last(SimplePathSegment::Ident(Identifier::new(last).into()));
+        }
+
+        SimplePath {
+            leading_colon: None,
+            segments,
+        }
+    }
+
+    #[test]
+    fn test_function_item() {
+        assert_item_eq!(
+            "fn foo() { }",
+            Item::Function(FunctionItem {
+                fn_token: Token::Keyword(Keyword::Fn).into(),
+                name: Identifier::new("foo").into(),
+                generics: None,
+                params: FunctionParams {
+                    paren_token: Paren {
+                        open: Token::Symbol(Symbol::LParen).into(),
+                        close: Token::Symbol(Symbol::RParen).into(),
+                    },
+                    params: Punctuated::new(),
+                },
+                return_type: None,
+                body: FunctionBody {
+                    brace_token: Brace {
+                        open: Token::Symbol(Symbol::LBrace).into(),
+                        close: Token::Symbol(Symbol::RBrace).into(),
+                    },
+                    stmts: vec![],
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn test_function_with_params() {
+        assert_item_eq!(
+            "fn add(a: int, b: int) -> int { a + b }",
+            Item::Function(FunctionItem {
+                fn_token: Token::Keyword(Keyword::Fn).into(),
+                name: Identifier::new("add").into(),
+                generics: None,
+                params: FunctionParams {
+                    paren_token: Paren {
+                        open: Token::Symbol(Symbol::LParen).into(),
+                        close: Token::Symbol(Symbol::RParen).into(),
+                    },
+                    params: {
+                        let mut params = Punctuated::new();
+                        params.push(
+                            FunctionParam {
+                                pattern: ident_pattern("a"),
+                                type_annotation: (
+                                    Token::Symbol(Symbol::Colon).into(),
+                                    Box::new(Type::Primitive(Primitive::Integer(
+                                        Token::Keyword(Keyword::Int).into(),
+                                    ))),
+                                ),
+                            },
+                            Token::Symbol(Symbol::Comma).into(),
+                        );
+                        params.last = Some(Box::new(FunctionParam {
+                            pattern: ident_pattern("b"),
+                            type_annotation: (
+                                Token::Symbol(Symbol::Colon).into(),
+                                Box::new(Type::Primitive(Primitive::Integer(
+                                    Token::Keyword(Keyword::Int).into(),
+                                ))),
+                            ),
+                        }));
+                        params
+                    },
+                },
+                return_type: Some((
+                    Token::Symbol(Symbol::RArrow).into(),
+                    Box::new(Type::Primitive(Primitive::Integer(
+                        Token::Keyword(Keyword::Int).into()
+                    ))),
+                )),
+                body: FunctionBody {
+                    brace_token: Brace {
+                        open: Token::Symbol(Symbol::LBrace).into(),
+                        close: Token::Symbol(Symbol::RBrace).into(),
+                    },
+                    stmts: vec![Statement::Expression(ExpressionStatement {
+                        expr: Expression::Operator(OperatorExpression::Arithmetic {
+                            left: Box::new(Expression::Path(path_expr(&["a"]))),
+                            op: Spanned::new(BinOp::Add, Span::default()),
+                            right: Box::new(Expression::Path(path_expr(&["b"]))),
+                        }),
+                        semi_token: None,
+                    })],
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn test_struct_item() {
+        assert_item_eq!(
+            "struct Point { x: int, y: int }",
+            Item::Struct(StructItem {
+                struct_token: Token::Keyword(Keyword::Struct).into(),
+                name: Identifier::new("Point").into(),
+                generics: None,
+                fields: StructFields::Named(NamedFields {
+                    brace_token: Brace {
+                        open: Token::Symbol(Symbol::LBrace).into(),
+                        close: Token::Symbol(Symbol::RBrace).into(),
+                    },
+                    visibility: None,
+                    fields: {
+                        let mut fields = Punctuated::new();
+                        fields.push(
+                            NamedField {
+                                name: Identifier::new("x").into(),
+                                colon_token: Token::Symbol(Symbol::Colon).into(),
+                                ty: Box::new(Type::Primitive(Primitive::Integer(
+                                    Token::Keyword(Keyword::Int).into(),
+                                ))),
+                            },
+                            Token::Symbol(Symbol::Comma).into(),
+                        );
+                        fields.last = Some(Box::new(NamedField {
+                            name: Identifier::new("y").into(),
+                            colon_token: Token::Symbol(Symbol::Colon).into(),
+                            ty: Box::new(Type::Primitive(Primitive::Integer(
+                                Token::Keyword(Keyword::Int).into(),
+                            ))),
+                        }));
+                        fields
+                    },
+                }),
+                semi_token: None,
+            })
+        );
+    }
+
+    #[test]
+    fn test_unit_struct_item() {
+        assert_item_eq!(
+            "struct Unit;",
+            Item::Struct(StructItem {
+                struct_token: Token::Keyword(Keyword::Struct).into(),
+                name: Identifier::new("Unit").into(),
+                generics: None,
+                fields: StructFields::Unit,
+                semi_token: Some(Token::Symbol(Symbol::Semi).into()),
+            })
+        );
+    }
+
+    #[test]
+    fn test_enum_item() {
+        assert_item_eq!(
+            "enum Option { Some(int), None }",
+            Item::Enum(EnumItem {
+                enum_token: Token::Keyword(Keyword::Enum).into(),
+                name: Identifier::new("Option").into(),
+                generics: None,
+                brace_token: Brace {
+                    open: Token::Symbol(Symbol::LBrace).into(),
+                    close: Token::Symbol(Symbol::RBrace).into(),
+                },
+                variants: {
+                    let mut variants = Punctuated::new();
+                    variants.push(
+                        EnumVariant {
+                            name: Identifier::new("Some").into(),
+                            fields: Some(EnumVariantFields::Tuple(TupleFields {
+                                paren_token: Paren {
+                                    open: Token::Symbol(Symbol::LParen).into(),
+                                    close: Token::Symbol(Symbol::RParen).into(),
+                                },
+                                visibility: None,
+                                fields: {
+                                    let mut fields = Punctuated::new();
+                                    fields.last = Some(Box::new(TupleField {
+                                        visibility: None,
+                                        ty: Box::new(Type::Primitive(Primitive::Integer(
+                                            Token::Keyword(Keyword::Int).into(),
+                                        ))),
+                                    }));
+                                    fields
+                                },
+                            })),
+                            discriminant: None,
+                        },
+                        Token::Symbol(Symbol::Comma).into(),
+                    );
+                    variants.last = Some(Box::new(EnumVariant {
+                        name: Identifier::new("None").into(),
+                        fields: None,
+                        discriminant: None,
+                    }));
+                    variants
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn test_type_alias_item() {
+        assert_item_eq!(
+            "type MyInt = int;",
+            Item::TypeAlias(TypeAliasItem {
+                type_token: Token::Keyword(Keyword::Type).into(),
+                name: Identifier::new("MyInt").into(),
+                generics: None,
+                eq_token: Token::Symbol(Symbol::Eq).into(),
+                ty: Box::new(Type::Primitive(Primitive::Integer(
+                    Token::Keyword(Keyword::Int).into()
+                ))),
+                semi_token: Token::Symbol(Symbol::Semi).into(),
+            })
+        );
+    }
+
+    #[test]
+    fn test_const_item() {
+        assert_item_eq!(
+            "const PI: float = 3.14;",
+            Item::Const(ConstItem {
+                const_token: Token::Keyword(Keyword::Const).into(),
+                name: Identifier::new("PI").into(),
+                colon_token: Token::Symbol(Symbol::Colon).into(),
+                ty: Box::new(Type::Primitive(Primitive::Float(
+                    Token::Keyword(Keyword::Float).into()
+                ))),
+                eq_token: Token::Symbol(Symbol::Eq).into(),
+                expr: Box::new(Literal::Float(3.14).into()),
+                semi_token: Token::Symbol(Symbol::Semi).into(),
+            })
+        );
+    }
+
+    #[test]
+    fn test_use_item() {
+        assert_item_eq!(
+            "use std::io;",
+            Item::Use(UseItem {
+                use_token: Token::Keyword(Keyword::Use).into(),
+                tree: UseTree::Path(simple_path(&["std", "io"])),
+                semi_token: Token::Symbol(Symbol::Semi).into(),
+            })
+        );
+    }
+
+    #[test]
+    fn test_module_item() {
+        assert_item_eq!(
+            "mod foo;",
+            Item::Module(ModuleItem {
+                mod_token: Token::Keyword(Keyword::Mod).into(),
+                name: Identifier::new("foo").into(),
+                content: None,
+                semi_token: Some(Token::Symbol(Symbol::Semi).into()),
+            })
+        );
+    }
 }
