@@ -209,15 +209,7 @@ fn parse_struct_pattern(stream: &mut ParseStream) -> Result<StructPattern, Parse
         fields: Punctuated {
             items: fields
                 .into_iter()
-                .map(|f| {
-                    (
-                        f,
-                        TokenSpan {
-                            value: Token::Symbol(Symbol::Comma),
-                            span: Span::default(),
-                        },
-                    )
-                })
+                .map(|f| (f, Token::Symbol(Symbol::Comma).into()))
                 .collect(),
             last: None,
         },

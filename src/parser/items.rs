@@ -487,6 +487,7 @@ mod tests {
     use super::*;
     use crate::diagnostic::{Span, Spanned};
     use crate::lexical::{Identifier, Literal, Token, TokenStream};
+    use crate::source::FileId;
     use crate::syntax::{
         BinOp, Expression, Pattern, Statement, Type, expressions::*, items::*,
         patterns::IdentifierPattern, statements::ExpressionStatement, types::Primitive,
@@ -502,7 +503,7 @@ mod tests {
     }
 
     fn parse_item(input: &str) -> Result<Item, ParseError> {
-        let tokens = TokenStream::parse(input).unwrap();
+        let tokens = TokenStream::parse(FileId::default(), input).unwrap();
         let mut stream = ParseStream::new(&tokens);
         Item::parse(&mut stream)
     }
@@ -648,7 +649,7 @@ mod tests {
                     stmts: vec![Statement::Expression(ExpressionStatement {
                         expr: Expression::Operator(OperatorExpression::Arithmetic {
                             left: Box::new(Expression::Path(path_expr(&["a"]))),
-                            op: Spanned::new(BinOp::Add, Span::default()),
+                            op: BinOp::Add.into(),
                             right: Box::new(Expression::Path(path_expr(&["b"]))),
                         }),
                         semi_token: None,

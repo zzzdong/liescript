@@ -341,10 +341,7 @@ impl<T: Parse> Parse for Spanned<T> {
 
         Ok(Spanned {
             value,
-            span: Span {
-                start: start_token.span.start,
-                end: end_token.span.end,
-            },
+            span: start_token.span().merge(end_token.span()),
         })
     }
 }

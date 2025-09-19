@@ -82,7 +82,7 @@ pub struct FunctionItem {
 
 impl FunctionItem {
     pub fn span(&self) -> Span {
-        Span::new(self.fn_token.span().start, self.body.span().end)
+        self.fn_token.span().merge(self.body.span())
     }
 }
 
@@ -130,7 +130,7 @@ pub struct FunctionParam {
 
 impl FunctionParam {
     pub fn span(&self) -> Span {
-        Span::new(self.pattern.span().start, self.type_annotation.1.span().end)
+        self.pattern.span().merge(self.type_annotation.1.span())
     }
 }
 
@@ -178,10 +178,7 @@ pub struct GenericParams {
 
 impl GenericParams {
     pub fn span(&self) -> Span {
-        Span::new(
-            self.angle_bracket_token.0.span().start,
-            self.angle_bracket_token.1.span().end,
-        )
+        self.angle_bracket_token.0.span().merge(self.angle_bracket_token.1.span())
     }
 }
 
@@ -227,23 +224,21 @@ pub struct TypeParam {
 
 impl TypeParam {
     pub fn span(&self) -> Span {
-        let start = self.name.span().start;
-        let end = if let Some((_, ref default)) = self.default {
-            default.span().end
-        } else if let Some((_, ref bounds)) = self.bounds {
-            // 获取最后一个bound的结束位置
+        let mut span = self.name.span();
+        
+        if let Some((_, ref bounds)) = self.bounds {
             if let Some(last) = bounds.last.as_ref() {
-                last.span().end
+                span = span.merge(last.span());
             } else if let Some((last, _)) = bounds.items.last() {
-                last.span().end
-            } else {
-                self.name.span().end
+                span = span.merge(last.span());
             }
-        } else {
-            self.name.span().end
-        };
+        }
+        
+        if let Some((_, ref default)) = self.default {
+            span = span.merge(default.span());
+        }
 
-        Span::new(start, end)
+        span
     }
 }
 
@@ -270,13 +265,15 @@ pub struct StructItem {
 
 impl StructItem {
     pub fn span(&self) -> Span {
-        let end = if let Some(semi) = &self.semi_token {
-            semi.span().end
+        let mut span = self.struct_token.span();
+        
+        if let Some(semi) = &self.semi_token {
+            span = span.merge(semi.span());
         } else {
-            self.fields.span().end
-        };
+            span = span.merge(self.fields.span());
+        }
 
-        Span::new(self.struct_token.span().start, end)
+        span
     }
 }
 
@@ -309,7 +306,7 @@ impl StructFields {
         match self {
             StructFields::Named(fields) => fields.span(),
             StructFields::Tuple(fields) => fields.span(),
-            StructFields::Unit => Span::default(), // 单元结构体没有字段，返回默认span
+            StructFields::Unit => Span::dummy(), // 单元结构体没有字段，返回默认span
         }
     }
 }
@@ -360,7 +357,7 @@ pub struct NamedField {
 
 impl NamedField {
     pub fn span(&self) -> Span {
-        Span::new(self.name.span().start, self.ty.span().end)
+        self.name.span().merge(self.ty.span())
     }
 }
 
@@ -404,10 +401,13 @@ pub struct TupleField {
 
 impl TupleField {
     pub fn span(&self) -> Span {
-        match &self.visibility {
-            Some(visibility) => Span::new(visibility.span().start, self.ty.span().end),
-            None => self.ty.span(),
+        let mut span = self.ty.span();
+        
+        if let Some(visibility) = &self.visibility {
+            span = visibility.span().merge(span);
         }
+
+        span
     }
 }
 
@@ -434,7 +434,7 @@ pub struct EnumItem {
 
 impl EnumItem {
     pub fn span(&self) -> Span {
-        Span::new(self.enum_token.span().start, self.brace_token.span().end)
+        self.enum_token.span().merge(self.brace_token.span())
     }
 }
 
@@ -459,16 +459,17 @@ pub struct EnumVariant {
 
 impl EnumVariant {
     pub fn span(&self) -> Span {
-        let start = self.name.span().start;
-        let end = if let Some((_, ref expr)) = self.discriminant {
-            expr.span().end
-        } else if let Some(ref fields) = self.fields {
-            fields.span().end
-        } else {
-            self.name.span().end
-        };
+        let mut span = self.name.span();
+        
+        if let Some(ref fields) = self.fields {
+            span = span.merge(fields.span());
+        }
+        
+        if let Some((_, ref expr)) = self.discriminant {
+            span = span.merge(expr.span());
+        }
 
-        Span::new(start, end)
+        span
     }
 }
 
@@ -526,7 +527,7 @@ pub struct TypeAliasItem {
 
 impl TypeAliasItem {
     pub fn span(&self) -> Span {
-        Span::new(self.type_token.span().start, self.semi_token.span().end)
+        self.type_token.span().merge(self.semi_token.span())
     }
 }
 
@@ -555,7 +556,7 @@ pub struct ConstItem {
 
 impl ConstItem {
     pub fn span(&self) -> Span {
-        Span::new(self.const_token.span().start, self.semi_token.span().end)
+        self.const_token.span().merge(self.semi_token.span())
     }
 }
 
@@ -584,7 +585,7 @@ pub struct StaticItem {
 
 impl StaticItem {
     pub fn span(&self) -> Span {
-        Span::new(self.static_token.span().start, self.semi_token.span().end)
+        self.static_token.span().merge(self.semi_token.span())
     }
 }
 
@@ -610,15 +611,17 @@ pub struct ModuleItem {
 
 impl ModuleItem {
     pub fn span(&self) -> Span {
-        let end = if let Some(semi) = &self.semi_token {
-            semi.span().end
+        let mut span = self.mod_token.span();
+        
+        if let Some(semi) = &self.semi_token {
+            span = span.merge(semi.span());
         } else if let Some(content) = &self.content {
-            content.span().end
+            span = span.merge(content.span());
         } else {
-            self.name.span().end
-        };
+            span = span.merge(self.name.span());
+        }
 
-        Span::new(self.mod_token.span().start, end)
+        span
     }
 }
 
@@ -662,7 +665,7 @@ pub struct UseItem {
 
 impl UseItem {
     pub fn span(&self) -> Span {
-        Span::new(self.use_token.span().start, self.semi_token.span().end)
+        self.use_token.span().merge(self.semi_token.span())
     }
 }
 
@@ -723,14 +726,13 @@ pub struct UsePathTree {
 
 impl UsePathTree {
     pub fn span(&self) -> Span {
-        let start = self.path.span().start;
-        let end = if let Some(tree) = &self.tree {
-            tree.span().end
-        } else {
-            self.path.span().end
-        };
+        let mut span = self.path.span();
+        
+        if let Some(tree) = &self.tree {
+            span = span.merge(tree.span());
+        }
 
-        Span::new(start, end)
+        span
     }
 }
 
@@ -789,7 +791,7 @@ pub struct UseRenameTree {
 
 impl UseRenameTree {
     pub fn span(&self) -> Span {
-        Span::new(self.path.span().start, self.rename.span().end)
+        self.path.span().merge(self.rename.span())
     }
 }
 

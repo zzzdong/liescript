@@ -4,6 +4,7 @@ mod error;
 mod instructions;
 mod lexical;
 mod parser;
+mod source;
 mod syntax;
 mod value;
 mod vm;

@@ -21,8 +21,7 @@ impl Parse for Visibility {
             Some(t) => Err(ParseError::new("expected visibility".to_string())
                 .with_expected(Keyword::Pub)
                 .with_expected(Keyword::Priv)
-                .with_found(t)
-                .with_span(peek.map(|t| t.span()).unwrap_or_default())),
+                .with_found(t)),
             None => Err(ParseError::eof()),
         }
     }

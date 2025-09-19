@@ -337,12 +337,12 @@ pub struct LoopExpression {
 impl LoopExpression {
     pub fn span(&self) -> Span {
         let start = if let Some(label) = &self.label {
-            label.span().start
+            label.span()
         } else {
-            self.loop_token.span().start
+            self.loop_token.span()
         };
 
-        Span::new(start, self.body.span().end)
+        start.merge(self.body.span())
     }
 }
 
@@ -369,12 +369,12 @@ pub struct WhileLoopExpression {
 impl WhileLoopExpression {
     pub fn span(&self) -> Span {
         let start = if let Some(label) = &self.label {
-            label.span().start
+            label.span()
         } else {
-            self.while_token.span().start
+            self.while_token.span()
         };
 
-        Span::new(start, self.body.span().end)
+        start.merge(self.body.span())
     }
 }
 
@@ -403,12 +403,12 @@ pub struct ForLoopExpression {
 impl ForLoopExpression {
     pub fn span(&self) -> Span {
         let start = if let Some(label) = &self.label {
-            label.span().start
+            label.span()
         } else {
-            self.for_token.span().start
+            self.for_token.span()
         };
 
-        Span::new(start, self.body.span().end)
+        start.merge(self.body.span())
     }
 }
 
@@ -435,12 +435,12 @@ pub struct IfExpression {
 impl IfExpression {
     pub fn span(&self) -> Span {
         let end = if let Some((_else_token, else_branch)) = &self.else_branch {
-            else_branch.span().end
+            else_branch.span()
         } else {
-            self.then_branch.span().end
+            self.then_branch.span()
         };
 
-        Span::new(self.if_token.span().start, end)
+        self.if_token.span().merge(end)
     }
 }
 
@@ -466,7 +466,7 @@ pub struct MatchExpression {
 
 impl MatchExpression {
     pub fn span(&self) -> Span {
-        Span::new(self.match_token.span().start, self.brace_token.span().end)
+        self.match_token.span().merge(self.brace_token.span())
     }
 }
 
@@ -581,33 +581,19 @@ impl OperatorExpression {
         match self {
             OperatorExpression::Borrow {
                 and_token, expr, ..
-            } => Span::new(and_token.span().start, expr.span().end),
-            OperatorExpression::Deref { star_token, expr } => {
-                Span::new(star_token.span().start, expr.span().end)
-            }
+            } => and_token.span().merge(expr.span()),
+            OperatorExpression::Deref { star_token, expr } => star_token.span().merge(expr.span()),
             OperatorExpression::Try {
                 expr,
                 question_token,
-            } => Span::new(expr.span().start, question_token.span().end),
-            OperatorExpression::Neg { op, expr } => Span::new(op.span().start, expr.span().end),
-            OperatorExpression::Arithmetic { left, right, .. } => {
-                Span::new(left.span().start, right.span().end)
-            }
-            OperatorExpression::Comparison { left, right, .. } => {
-                Span::new(left.span().start, right.span().end)
-            }
-            OperatorExpression::Logical { left, right, .. } => {
-                Span::new(left.span().start, right.span().end)
-            }
-            OperatorExpression::Cast { expr, ty, .. } => {
-                Span::new(expr.span().start, ty.span().end)
-            }
-            OperatorExpression::Assign { left, right, .. } => {
-                Span::new(left.span().start, right.span().end)
-            }
-            OperatorExpression::AssignOp { left, right, .. } => {
-                Span::new(left.span().start, right.span().end)
-            }
+            } => expr.span().merge(question_token.span()),
+            OperatorExpression::Neg { op, expr } => op.span().merge(expr.span()),
+            OperatorExpression::Arithmetic { left, right, .. } => left.span().merge(right.span()),
+            OperatorExpression::Comparison { left, right, .. } => left.span().merge(right.span()),
+            OperatorExpression::Logical { left, right, .. } => left.span().merge(right.span()),
+            OperatorExpression::Cast { expr, ty, .. } => expr.span().merge(ty.span()),
+            OperatorExpression::Assign { left, right, .. } => left.span().merge(right.span()),
+            OperatorExpression::AssignOp { left, right, .. } => left.span().merge(right.span()),
         }
     }
 }
@@ -690,7 +676,7 @@ pub struct AwaitExpression {
 
 impl AwaitExpression {
     pub fn span(&self) -> Span {
-        Span::new(self.expr.span().start, self.await_token.span().end)
+        self.expr.span().merge(self.await_token.span())
     }
 }
 
@@ -716,7 +702,7 @@ pub struct StructExpression {
 
 impl StructExpression {
     pub fn span(&self) -> Span {
-        Span::new(self.path.span().start, self.brace_token.span().end)
+        self.path.span().merge(self.brace_token.span())
     }
 }
 
@@ -740,7 +726,7 @@ pub struct AsyncBlockExpression {
 
 impl AsyncBlockExpression {
     pub fn span(&self) -> Span {
-        Span::new(self.async_token.span().start, self.block.span().end)
+        self.async_token.span().merge(self.block.span())
     }
 }
 
@@ -759,19 +745,16 @@ impl HasSpan for AsyncBlockExpression {
 #[derive(Debug, PartialEq)]
 pub struct StructExprField {
     pub member: IdentSpan,
-    pub colon_token: Option<TokenSpan>,
-    pub expr: Option<Box<Expression>>,
+    pub expr: Option<(TokenSpan, Box<Expression>)>, // field: a+b
 }
 
 impl StructExprField {
     pub fn span(&self) -> Span {
-        Span::new(
-            self.member.span().start,
+        self.member.span().merge(
             self.expr
                 .as_ref()
-                .map(|e| e.span())
-                .unwrap_or(self.member.span())
-                .end,
+                .map(|(_, e)| e.span())
+                .unwrap_or(self.member.span()),
         )
     }
 }
@@ -796,7 +779,7 @@ pub struct Label {
 
 impl Label {
     pub fn span(&self) -> Span {
-        Span::new(self.label.span().start, self.colon_token.span().end)
+        self.label.span().merge(self.colon_token.span())
     }
 }
 
@@ -824,13 +807,13 @@ pub struct MatchArm {
 
 impl MatchArm {
     pub fn span(&self) -> Span {
-        let start = self.pat.span().start;
+        let start = self.pat.span();
         let end = if let Some(comma) = &self.comma_token {
-            comma.span().end
+            comma.span()
         } else {
-            self.body.span().end
+            self.body.span()
         };
-        Span::new(start, end)
+        start.merge(end)
     }
 }
 
@@ -849,7 +832,7 @@ pub struct MatchArmGuard {
 
 impl MatchArmGuard {
     pub fn span(&self) -> Span {
-        Span::new(self.if_token.span().start, self.expr.span().end)
+        self.if_token.span().merge(self.expr.span())
     }
 }
 
@@ -874,7 +857,7 @@ pub struct FieldExpression {
 
 impl FieldExpression {
     pub fn span(&self) -> Span {
-        Span::new(self.expr.span().start, self.field.span().end)
+        self.expr.span().merge(self.field.span())
     }
 }
 
@@ -899,7 +882,7 @@ pub struct TupleIndexingExpression {
 
 impl TupleIndexingExpression {
     pub fn span(&self) -> Span {
-        Span::new(self.expr.span().start, self.index.span().end)
+        self.expr.span().merge(self.index.span())
     }
 }
 
@@ -924,7 +907,7 @@ pub struct CallExpression {
 
 impl CallExpression {
     pub fn span(&self) -> Span {
-        Span::new(self.expr.span().start, self.paren_token.span().end)
+        self.expr.span().merge(self.paren_token.span())
     }
 }
 
@@ -951,7 +934,7 @@ pub struct MethodCallExpression {
 
 impl MethodCallExpression {
     pub fn span(&self) -> Span {
-        Span::new(self.expr.span().start, self.paren_token.span().end)
+        self.expr.span().merge(self.paren_token.span())
     }
 }
 
@@ -976,7 +959,7 @@ pub struct IndexExpression {
 
 impl IndexExpression {
     pub fn span(&self) -> Span {
-        Span::new(self.expr.span().start, self.bracket_token.span().end)
+        self.expr.span().merge(self.bracket_token.span())
     }
 }
 
@@ -1087,18 +1070,18 @@ pub struct RangeExpression {
 impl RangeExpression {
     pub fn span(&self) -> Span {
         let start = if let Some(start) = &self.start {
-            start.span().start
+            start.span()
         } else {
-            self.limits.span().start
+            self.limits.span()
         };
 
         let end = if let Some(end) = &self.end {
-            end.span().end
+            end.span()
         } else {
-            self.limits.span().end
+            self.limits.span()
         };
 
-        Span::new(start, end)
+        start.merge(end)
     }
 }
 
@@ -1126,12 +1109,12 @@ pub struct ClosureExpression {
 impl ClosureExpression {
     pub fn span(&self) -> Span {
         let start = if let Some(move_token) = &self.move_token {
-            move_token.span().start
+            move_token.span()
         } else {
-            self.or_token.0.span().start
+            self.or_token.0.span()
         };
 
-        Span::new(start, self.body.span().end)
+        start.merge(self.body.span())
     }
 }
 
@@ -1150,14 +1133,14 @@ pub struct ClosureParam {
 
 impl ClosureParam {
     pub fn span(&self) -> Span {
-        let start = self.pattern.span().start;
+        let start = self.pattern.span();
         let end = if let Some(ty) = &self.ty {
-            ty.span().end
+            ty.span()
         } else {
-            self.pattern.span().end
+            self.pattern.span()
         };
 
-        Span::new(start, end)
+        start.merge(end)
     }
 }
 
@@ -1183,14 +1166,14 @@ pub struct BreakExpression {
 impl BreakExpression {
     pub fn span(&self) -> Span {
         let end = if let Some(expr) = &self.expr {
-            expr.span().end
+            expr.span()
         } else if let Some(label) = &self.label {
-            label.span().end
+            label.span()
         } else {
-            self.break_token.span().end
+            self.break_token.span()
         };
 
-        Span::new(self.break_token.span().start, end)
+        self.break_token.span().merge(end)
     }
 }
 
@@ -1215,12 +1198,12 @@ pub struct ContinueExpression {
 impl ContinueExpression {
     pub fn span(&self) -> Span {
         let end = if let Some(label) = &self.label {
-            label.span().end
+            label.span()
         } else {
-            self.continue_token.span().end
+            self.continue_token.span()
         };
 
-        Span::new(self.continue_token.span().start, end)
+        self.continue_token.span().merge(end)
     }
 }
 
@@ -1245,12 +1228,12 @@ pub struct ReturnExpression {
 impl ReturnExpression {
     pub fn span(&self) -> Span {
         let end = if let Some(expr) = &self.expr {
-            expr.span().end
+            expr.span()
         } else {
-            self.return_token.span().end
+            self.return_token.span()
         };
 
-        Span::new(self.return_token.span().start, end)
+        self.return_token.span().merge(end)
     }
 }
 

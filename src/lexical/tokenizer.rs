@@ -2,7 +2,8 @@ use std::str::Chars;
 
 use super::token::{Token, TokenSpan};
 use super::{ident::Identifier, keyword::Keyword, literal::Literal, symbol::Symbol};
-use crate::diagnostic::{Pos, Span, Spanned};
+use crate::diagnostic::{Span, Spanned};
+use crate::source::FileId;
 
 #[derive(Debug)]
 pub struct TokenError {
@@ -63,23 +64,25 @@ impl std::error::Error for TokenError {
 #[derive(Clone)]
 pub struct Tokenizer<'i> {
     chars: Chars<'i>,
+    file: FileId,
     input: &'i str,
-    pos: Pos,
+    offset: u32,
 }
 
 impl<'i> Tokenizer<'i> {
-    pub fn new(input: &'i str) -> Self {
+    pub fn new(file: FileId, input: &'i str) -> Self {
         let chars = input.chars();
 
         Tokenizer {
             chars,
+            file,
             input,
-            pos: Pos::dummy(),
+            offset: 0,
         }
     }
 
-    fn pos(&self) -> Pos {
-        self.pos
+    fn pos(&self) -> u32 {
+        self.offset
     }
 
     fn new_token(&self, token: Token, span: Span) -> TokenSpan {
@@ -90,8 +93,8 @@ impl<'i> Tokenizer<'i> {
         let start = self.pos();
 
         self.next_token_inner()
-            .map(|token| self.new_token(token, Span::new(start, self.pos())))
-            .map_err(|e| e.with_span(Span::new(start, self.pos())))
+            .map(|token| self.new_token(token, Span::new(self.file, start, self.pos())))
+            .map_err(|e| e.with_span(Span::new(self.file, start, self.pos())))
     }
 
     fn next_token_inner(&mut self) -> Result<Token, TokenError> {
@@ -135,13 +138,7 @@ impl<'i> Tokenizer<'i> {
 
     fn next_char(&mut self) -> Option<char> {
         self.chars.next().inspect(|&c| {
-            self.pos.offset += c.len_utf8();
-            if c == '\n' {
-                self.pos.line += 1;
-                self.pos.column = 1;
-            } else {
-                self.pos.column += 1;
-            }
+            self.offset += c.len_utf8() as u32;
         })
     }
 
@@ -240,7 +237,7 @@ impl<'i> Tokenizer<'i> {
             return number.parse::<f64>().map(Token::float).map_err(|e| {
                 TokenError::new("parse float failed")
                     .with_source(e)
-                    .with_span(Span::new(start, self.pos()))
+                    .with_span(Span::new(self.file, start, self.pos()))
             });
         }
 
@@ -249,7 +246,7 @@ impl<'i> Tokenizer<'i> {
         number.parse::<i64>().map(Token::int).map_err(|e| {
             TokenError::new("parse float failed")
                 .with_source(e)
-                .with_span(Span::new(start, self.pos()))
+                .with_span(Span::new(self.file, start, self.pos()))
         })
     }
 
@@ -391,13 +388,14 @@ impl<'i> Tokenizer<'i> {
                 Token::Symbol(Symbol::RParen)
                 | Token::Symbol(Symbol::RBracket)
                 | Token::Symbol(Symbol::RBrace) => {
-                    return Ok(
-                        self.new_token(Token::Tree(group), Span::new(group_start, self.pos()))
-                    );
+                    return Ok(self.new_token(
+                        Token::Tree(group),
+                        Span::new(self.file, group_start, self.pos()),
+                    ));
                 }
 
                 t => {
-                    group.push(self.new_token(t, Span::new(start, self.pos())));
+                    group.push(self.new_token(t, Span::new(self.file, start, self.pos())));
                 }
             }
         }
@@ -507,8 +505,8 @@ impl TokenStream {
         TokenStream { tokens }
     }
 
-    pub fn parse(input: &str) -> Result<Self, TokenError> {
-        let tokens = Tokenizer::new(input).collect::<Result<Vec<_>, _>>()?;
+    pub fn parse(file: FileId, input: &str) -> Result<Self, TokenError> {
+        let tokens = Tokenizer::new(file, input).collect::<Result<Vec<_>, _>>()?;
 
         let tokens = tokens
             .into_iter()
@@ -535,7 +533,7 @@ mod test {
     #[test]
     fn test_tokenize_identifier() {
         let input = "let x = 5;";
-        let tokenizer = Tokenizer::new(input);
+        let tokenizer = Tokenizer::new(FileId::default(), input);
 
         let tokens = tokenizer
             .into_iter()
@@ -558,7 +556,7 @@ mod test {
     #[test]
     fn test_tokenize_number() {
         let input = "123 45.67";
-        let tokenizer = Tokenizer::new(input);
+        let tokenizer = Tokenizer::new(FileId::default(), input);
 
         let tokens = tokenizer
             .into_iter()
@@ -578,7 +576,7 @@ mod test {
     #[test]
     fn test_tokenize_special_number_formats() {
         let input = "0b101 0o644 0xFF";
-        let tokenizer = Tokenizer::new(input);
+        let tokenizer = Tokenizer::new(FileId::default(), input);
 
         let tokens = tokenizer
             .into_iter()
@@ -599,7 +597,7 @@ mod test {
     #[test]
     fn test_tokenize_string_char() {
         let input = "\"hello world\" 'a'";
-        let tokenizer = Tokenizer::new(input);
+        let tokenizer = Tokenizer::new(FileId::default(), input);
 
         let tokens = tokenizer
             .into_iter()
@@ -619,7 +617,7 @@ mod test {
     #[test]
     fn test_tokenize_byte_string_char() {
         let input = r#"b"hello world" b'a'"#;
-        let tokenizer = Tokenizer::new(input);
+        let tokenizer = Tokenizer::new(FileId::default(), input);
 
         let tokens = tokenizer
             .into_iter()
@@ -639,7 +637,7 @@ mod test {
     #[test]
     fn test_tokenize_comment() {
         let input = "// This is a comment\nlet y = 10;";
-        let tokenizer = Tokenizer::new(input);
+        let tokenizer = Tokenizer::new(FileId::default(), input);
 
         let tokens = tokenizer
             .into_iter()
@@ -663,7 +661,7 @@ mod test {
     #[test]
     fn test_tokenize_operator() {
         let input = "+ - * / % == != > < =>";
-        let tokenizer = Tokenizer::new(input);
+        let tokenizer = Tokenizer::new(FileId::default(), input);
 
         let tokens = tokenizer
             .into_iter()
@@ -691,7 +689,7 @@ mod test {
     #[test]
     fn test_tokenize_keyword() {
         let input = "if else for while loop match";
-        let tokenizer = Tokenizer::new(input);
+        let tokenizer = Tokenizer::new(FileId::default(), input);
 
         let tokens = tokenizer
             .into_iter()
@@ -715,7 +713,7 @@ mod test {
     #[test]
     fn test_tokenize_bool() {
         let input = "true false";
-        let tokenizer = Tokenizer::new(input);
+        let tokenizer = Tokenizer::new(FileId::default(), input);
 
         let tokens = tokenizer
             .into_iter()
@@ -735,7 +733,7 @@ mod test {
     #[test]
     fn test_tokenize_parentheses() {
         let input = "()[]{}";
-        let tokenizer = Tokenizer::new(input);
+        let tokenizer = Tokenizer::new(FileId::default(), input);
 
         let tokens = tokenizer
             .into_iter()
@@ -759,7 +757,7 @@ mod test {
     #[test]
     fn test_tokenize_more_symbols() {
         let input = "!= += -= *= /= %= ^= &= |= << >> -> ::";
-        let tokenizer = Tokenizer::new(input);
+        let tokenizer = Tokenizer::new(FileId::default(), input);
 
         let tokens = tokenizer
             .into_iter()
@@ -790,7 +788,7 @@ mod test {
     #[test]
     fn test_tokenize_mixed_statement() {
         let input = "if (x > 5) { return x; }";
-        let tokenizer = Tokenizer::new(input);
+        let tokenizer = Tokenizer::new(FileId::default(), input);
 
         let tokens = tokenizer
             .into_iter()
@@ -820,7 +818,7 @@ mod test {
     fn test_tokenizer_cast() {
         let input = "x * y as float";
 
-        let tokenizer = Tokenizer::new(input);
+        let tokenizer = Tokenizer::new(FileId::default(), input);
 
         let tokens = tokenizer
             .into_iter()

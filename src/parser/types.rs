@@ -170,8 +170,9 @@ impl Type {
 
 mod tests {
     use super::*;
-    use crate::diagnostic::{Pos, Span};
+    use crate::diagnostic::{Span};
     use crate::lexical::{IdentSpan, Identifier, Keyword, Literal, Symbol, Token, TokenStream};
+    use crate::source::FileId;
     use crate::syntax::{PathIdentSegment, TypePathSegment, expressions::*};
 
     /// 解析类型并忽略Span信息进行比较
@@ -207,7 +208,7 @@ mod tests {
     }
 
     fn parse_type(input: &str) -> Result<Type, ParseError> {
-        let tokens = TokenStream::parse(input).unwrap();
+        let tokens = TokenStream::parse(FileId::default(), input).unwrap();
         let mut stream = ParseStream::new(&tokens);
         Type::parse(&mut stream)
     }

@@ -128,7 +128,7 @@ impl fmt::Display for Token {
             Token::Tree(tokens) => {
                 write!(f, "(")?;
                 for token in tokens {
-                    write!(f, "{} ", token)?;
+                    write!(f, "{} ", token.value())?;
                 }
                 write!(f, ")")
             }
@@ -210,7 +210,7 @@ impl Bracket {
     }
 
     pub fn span(&self) -> Span {
-        Span::new(self.open.span().start, self.close.span().end)
+        self.open.span().merge(self.close.span())
     }
 }
 
@@ -227,7 +227,7 @@ impl Paren {
     }
 
     pub fn span(&self) -> Span {
-        Span::new(self.open.span().start, self.close.span().end)
+        self.open.span().merge(self.close.span())
     }
 }
 
@@ -244,7 +244,7 @@ impl Brace {
     }
 
     pub fn span(&self) -> Span {
-        Span::new(self.open.span().start, self.close.span().end)
+        self.open.span().merge(self.close.span())
     }
 }
 
@@ -261,7 +261,7 @@ impl Angle {
     }
 
     pub fn span(&self) -> Span {
-        Span::new(self.open.span().start, self.close.span().end)
+        self.open.span().merge(self.close.span())
     }
 }
 
@@ -336,13 +336,13 @@ impl<T> Punctuated<T> {
 impl<T: HasSpan> Punctuated<T> {
     pub fn span(&self) -> Span {
         let span = match (self.items.first(), self.items.last()) {
-            (Some((start, _)), Some((_, end))) => Span::new(start.span().start, end.span().end),
+            (Some((first, _)), Some((_, last))) => first.span().merge(last.span()),
 
-            _ => Span::default(),
+            _ => Span::dummy(),
         };
 
         match &self.last {
-            Some(last) => Span::new(span.start, last.span().end),
+            Some(last) => span.merge(last.span()),
             None => span,
         }
     }
@@ -350,11 +350,7 @@ impl<T: HasSpan> Punctuated<T> {
 
 impl<T: HasSpan> HasSpan for Punctuated<T> {
     fn span(&self) -> Span {
-        self.items
-            .iter()
-            .map(|(item, _)| item.span())
-            .chain(self.last.iter().map(|item| item.span()))
-            .fold(Span::default(), |span, item| span.join(item))
+        self.span()
     }
 }
 

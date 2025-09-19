@@ -268,20 +268,20 @@ pub struct IdentifierPattern {
 impl IdentifierPattern {
     pub fn span(&self) -> Span {
         let start = if let Some(by_ref) = &self.by_ref {
-            by_ref.span().start
+            by_ref.span()
         } else if let Some(is_mut) = &self.is_mut {
-            is_mut.span().start
+            is_mut.span()
         } else {
-            self.ident.span().start
+            self.ident.span()
         };
 
         let end = if let Some((_, subpat)) = &self.subpat {
-            subpat.span().end
+            subpat.span()
         } else {
-            self.ident.span().end
+            self.ident.span()
         };
 
-        Span::new(start, end)
+        start.merge(end)
     }
 }
 
@@ -323,7 +323,7 @@ pub struct RangePattern {
 
 impl RangePattern {
     pub fn span(&self) -> Span {
-        Span::new(self.lo.span().start, self.hi.span().end)
+        self.lo.span().merge(self.hi.span())
     }
 }
 
@@ -343,7 +343,7 @@ pub struct ReferencePattern {
 
 impl ReferencePattern {
     pub fn span(&self) -> Span {
-        Span::new(self.and_token.span().start, self.pat.span().end)
+        self.and_token.span().merge(self.pat.span())
     }
 }
 
@@ -364,7 +364,7 @@ pub struct StructPattern {
 
 impl StructPattern {
     pub fn span(&self) -> Span {
-        Span::new(self.path.span().start, self.brace_token.span().end)
+        self.path.span().merge(self.brace_token.span())
     }
 }
 
@@ -384,9 +384,7 @@ pub struct FieldPattern {
 
 impl FieldPattern {
     pub fn span(&self) -> Span {
-        let start = self.member.span().start;
-        let end = self.pat.span().end;
-        Span::new(start, end)
+        self.member.span().merge(self.pat.span())
     }
 }
 
@@ -406,7 +404,7 @@ pub struct TupleStructPattern {
 
 impl TupleStructPattern {
     pub fn span(&self) -> Span {
-        Span::new(self.path.span().start, self.paren_token.span().end)
+        self.path.span().merge(self.paren_token.span())
     }
 }
 

@@ -98,6 +98,7 @@ mod tests {
     use super::*;
     use crate::diagnostic::Span;
     use crate::lexical::{Brace, Identifier, Literal, Paren, Punctuated, Token, TokenStream};
+    use crate::source::FileId;
     use crate::syntax::patterns::{IdentifierPattern, ReferencePattern, TuplePattern};
     use crate::syntax::{
         PathExprSegment, PathIdentSegment, PathInExpression, Primitive, expressions::*,
@@ -112,7 +113,7 @@ mod tests {
     }
 
     fn parse_stmt(input: &str) -> Result<Statement, ParseError> {
-        let tokens = TokenStream::parse(input).unwrap();
+        let tokens = TokenStream::parse(FileId::default(), input).unwrap();
         let mut stream = ParseStream::new(&tokens);
         Statement::parse(&mut stream)
     }

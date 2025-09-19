@@ -224,7 +224,7 @@ pub struct ReferenceType {
 
 impl ReferenceType {
     pub fn span(&self) -> Span {
-        Span::new(self.and_token.span().start, self.ty.span().end)
+        self.and_token.span().merge(self.ty.span())
     }
 }
 
@@ -245,10 +245,7 @@ pub struct ArrayType {
 
 impl ArrayType {
     pub fn span(&self) -> Span {
-        Span::new(
-            self.bracket_token.span().start,
-            self.bracket_token.span().end,
-        )
+        self.bracket_token.span()
     }
 }
 
@@ -306,14 +303,14 @@ pub struct BareFunctionType {
 
 impl BareFunctionType {
     pub fn span(&self) -> Span {
-        let start = self.fn_token.span().start;
-        let end = if let Some((_, output)) = &self.output {
-            output.span().end
-        } else {
-            self.paren_token.span().end
-        };
+        let start = self.fn_token.span();
+        let end = self
+            .output
+            .as_ref()
+            .map(|(_, ty)| ty.span())
+            .unwrap_or(self.inputs.span());
 
-        Span::new(start, end)
+        start.merge(end)
     }
 }
 

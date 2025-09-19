@@ -98,8 +98,7 @@ fn parse_primary(stream: &mut ParseStream) -> Result<Expression, ParseError> {
         }
         _ => Err(ParseError::new("Expected primary expression")
             .with_span(start_token.span)
-            .with_expected("valid primary expression")
-            .with_found(&start_token)),
+            .with_expected("valid primary expression"))
     }
 }
 
@@ -758,11 +757,7 @@ fn parse_struct_expr_field(stream: &mut ParseStream) -> Result<StructExprField, 
     let member = stream.expect_identifier()?;
 
     if !stream.next_is(Symbol::Colon) {
-        return Ok(StructExprField {
-            member,
-            colon_token: None,
-            expr: None,
-        });
+        return Ok(StructExprField { member, expr: None });
     }
 
     let colon_token = stream.expect_symbol(Symbol::Colon)?;
@@ -770,8 +765,7 @@ fn parse_struct_expr_field(stream: &mut ParseStream) -> Result<StructExprField, 
 
     Ok(StructExprField {
         member,
-        colon_token: Some(colon_token),
-        expr: Some(expr),
+        expr: Some((colon_token, expr)),
     })
 }
 
@@ -912,8 +906,9 @@ impl Parse for Label {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diagnostic::{Pos, Span};
+    use crate::diagnostic::Span;
     use crate::lexical::{IdentSpan, Identifier, Literal, Token, TokenStream};
+    use crate::source::FileId;
     use crate::syntax::{
         ExpressionStatement, LetStatement, LiteralPattern, PathExprSegment, PathIdentSegment,
         WildcardPattern, expressions::*,
@@ -956,7 +951,7 @@ mod tests {
     }
 
     fn parse_expr(input: &str) -> Result<Expression, ParseError> {
-        let tokens = TokenStream::parse(input).unwrap();
+        let tokens = TokenStream::parse(FileId::default(), input).unwrap();
         let mut stream = ParseStream::new(&tokens);
         parse_expression(&mut stream)
     }
@@ -1430,19 +1425,23 @@ mod tests {
                     fields.push(
                         StructExprField {
                             member: Identifier::new("x").into(),
-                            colon_token: Some(Token::Symbol(Symbol::Colon).into()),
-                            expr: Some(Box::new(Expression::Literal(LiteralExpression {
-                                lit: Literal::Integer(1).into(),
-                            }))),
+                            expr: Some((
+                                Token::Symbol(Symbol::Colon).into(),
+                                Box::new(Expression::Literal(LiteralExpression {
+                                    lit: Literal::Integer(1).into(),
+                                })),
+                            )),
                         },
                         Token::Symbol(Symbol::Comma).into(),
                     );
                     fields.push_last(StructExprField {
                         member: Identifier::new("y").into(),
-                        colon_token: Some(Token::Symbol(Symbol::Colon).into()),
-                        expr: Some(Box::new(Expression::Literal(LiteralExpression {
-                            lit: Literal::Integer(2).into(),
-                        }))),
+                        expr: Some((
+                            Token::Symbol(Symbol::Colon).into(),
+                            Box::new(Expression::Literal(LiteralExpression {
+                                lit: Literal::Integer(2).into(),
+                            })),
+                        )),
                     });
 
                     fields

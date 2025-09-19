@@ -121,8 +121,7 @@ pub struct LetStatement {
 
 impl LetStatement {
     pub fn span(&self) -> Span {
-        let end = self.semi_token.span().end;
-        Span::new(self.let_token.span().start, end)
+        self.let_token.span().merge(self.semi_token.span())
     }
 }
 
@@ -151,7 +150,7 @@ pub struct ConstStatement {
 impl ConstStatement {
     pub fn span(&self) -> Span {
         let end = self.semi_token.span().end;
-        Span::new(self.const_token.span().start, end)
+        self.colon_token.span().merge(self.semi_token.span())
     }
 }
 
@@ -180,7 +179,7 @@ pub struct StaticStatement {
 impl StaticStatement {
     pub fn span(&self) -> Span {
         let end = self.semi_token.span().end;
-        Span::new(self.static_token.span().start, end)
+        self.static_token.span().merge(self.semi_token.span())
     }
 }
 
@@ -208,31 +207,12 @@ impl ExpressionStatement {
         let end = self
             .semi_token
             .as_ref()
-            .map_or(self.expr.span().end, |semi| semi.span().end);
-        Span::new(self.expr.span().start, end)
+            .map_or(self.expr.span(), |semi| semi.span());
+        self.expr.span().merge(end)
     }
 }
 
 impl HasSpan for ExpressionStatement {
-    fn span(&self) -> Span {
-        self.span()
-    }
-}
-
-/// 表达式后跟分号的语句
-#[derive(Debug, PartialEq)]
-pub struct ExpressionSemiStatement {
-    pub expr: Expression,
-    pub semi_token: TokenSpan,
-}
-
-impl ExpressionSemiStatement {
-    pub fn span(&self) -> Span {
-        Span::new(self.expr.span().start, self.semi_token.span().end)
-    }
-}
-
-impl HasSpan for ExpressionSemiStatement {
     fn span(&self) -> Span {
         self.span()
     }

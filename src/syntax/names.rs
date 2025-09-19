@@ -59,13 +59,10 @@ pub struct PathInExpression {
 
 impl PathInExpression {
     pub fn span(&self) -> Span {
-        Span::new(
-            self.leading_colon
-                .as_ref()
-                .map(|t| t.span().start)
-                .unwrap_or(self.segments.span().start),
-            self.segments.span().end,
-        )
+        match &self.leading_colon {
+            Some(t) => t.span().merge(self.segments.span()),
+            None => self.segments.span(),
+        }
     }
 }
 
@@ -83,13 +80,10 @@ pub struct PathExprSegment {
 
 impl PathExprSegment {
     pub fn span(&self) -> Span {
-        Span::new(
-            self.ident.span().start,
-            self.args
-                .as_ref()
-                .map(|(span, _)| span.span().end)
-                .unwrap_or(self.ident.span().end),
-        )
+        match &self.args {
+            Some((_, args)) => self.ident.span().merge(args.span()),
+            None => self.ident.span(),
+        }
     }
 }
 
@@ -161,13 +155,10 @@ pub struct TypePath {
 
 impl TypePath {
     pub fn span(&self) -> Span {
-        Span::new(
-            self.leading_colon
-                .as_ref()
-                .map(|t| t.span().start)
-                .unwrap_or(self.segments.span().start),
-            self.segments.span().end,
-        )
+        match &self.leading_colon {
+            Some(t) => t.span().merge(self.segments.span()),
+            None => self.segments.span(),
+        }
     }
 }
 
@@ -185,13 +176,14 @@ pub struct TypePathSegment {
 
 impl TypePathSegment {
     pub fn span(&self) -> Span {
-        Span::new(
-            self.ident.span().start,
-            self.args
-                .as_ref()
-                .map(|(_, args)| args.span().end)
-                .unwrap_or(self.ident.span().end),
-        )
+        match &self.args {
+            Some((_, args)) => {
+                self.ident.span().merge(args.span())
+            }
+            None => {
+                self.ident.span()
+            }
+        }
     }
 }
 
