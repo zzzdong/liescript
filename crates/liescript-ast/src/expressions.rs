@@ -1,8 +1,8 @@
-use super::{BinOp, PathInExpression, Pattern, RangeLimits, Statement, Type, UnOp};
-use crate::diagnostic::{HasSpan, Span, Spanned};
-use crate::lexical::{
-    Brace, Bracket, IdentSpan, Literal, LiteralSpan, Paren, Punctuated, TokenSpan,
-};
+use liescript_lexical::{ident::IdentSpan, literal::{Literal, LiteralSpan}, token::{Brace, Bracket, Paren, Punctuated, TokenSpan}, HasSpan, Span, Spanned};
+
+use crate::{names::PathInExpression, operators::{BinOp, UnOp}, patterns::{Pattern, RangeLimits}, statements::Statement, types::Type};
+
+
 
 /// Expression 是一种用于计算值的语法结构
 ///

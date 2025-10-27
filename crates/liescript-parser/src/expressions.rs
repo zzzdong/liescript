@@ -1,25 +1,14 @@
 //! 表达式解析模块 (使用Pratt parser)
 
-use crate::{
-    diagnostic::{Diagnostics, Span, Spanned},
-    lexical::{Brace, Bracket, Keyword, Literal, Paren, Punctuated, Symbol, Token, TokenSpan},
-    syntax::{
-        MatchExpression,
-        expressions::{
-            ArrayExpression, BlockExpression, BreakExpression, CallExpression, ContinueExpression,
-            Expression, FieldExpression, ForLoopExpression, GroupedExpression, IfExpression,
-            IndexExpression, LiteralExpression, LoopExpression, OperatorExpression, PathExpression,
-            RangeExpression, ReturnExpression, TupleIndexingExpression, UnderscoreExpression,
-            WhileLoopExpression,
-        },
-    },
-};
+use liescript_ast::{expressions::{
+    ArrayExpression, BlockExpression, BreakExpression, CallExpression, ContinueExpression, ElseBranch, Expression, FieldExpression, ForLoopExpression, GroupedExpression, IfExpression, IndexExpression, LiteralExpression, LoopExpression, MatchExpression, OperatorExpression, PathExpression, RangeExpression, ReturnExpression, TupleIndexingExpression, UnderscoreExpression, WhileLoopExpression
+}, operators::{BinOp, UnOp}, patterns::{Pattern, RangeLimits}, statements::Statement};
+use liescript_lexical::{keyword::Keyword, literal::Literal, symbol::Symbol, token::{Brace, Bracket, Paren, Punctuated, Token}, Spanned};
 
 use super::{
     Parse,
     context::ParseContext,
     diagnostic::{ParseError, ParseResult},
-    name, pattern, statement, r#type,
 };
 
 /// 解析表达式 (使用Pratt parser算法)
@@ -154,12 +143,12 @@ fn parse_prefix(cx: &mut ParseContext) -> ParseResult<Expression> {
             &Token::Symbol(Symbol::Not) | &Token::Symbol(Symbol::Minus) => {
                 let op_token = cx.consume()?;
                 let op = match op_token.value {
-                    Token::Symbol(Symbol::Not) => crate::syntax::operators::UnOp::Not,
-                    Token::Symbol(Symbol::Minus) => crate::syntax::operators::UnOp::Neg,
+                    Token::Symbol(Symbol::Not) => UnOp::Not,
+                    Token::Symbol(Symbol::Minus) => UnOp::Neg,
                     _ => unreachable!(),
                 };
                 return Ok(Expression::Operator(OperatorExpression::Neg {
-                    op: crate::diagnostic::Spanned::new(op, op_token.span),
+                    op: Spanned::new(op, op_token.span),
                     expr: Box::new(parse_prefix(cx)?),
                 }));
             }
@@ -181,7 +170,7 @@ fn parse_infix(cx: &mut ParseContext, left: Expression, right_bp: u8) -> ParseRe
     let right = Box::new(parse_expr(cx, right_bp)?);
 
     let expr = match bin_op {
-        crate::syntax::operators::BinOp::Assign => {
+        BinOp::Assign => {
             Expression::Operator(OperatorExpression::Assign {
                 left: Box::new(left),
                 eq_token: token,
@@ -190,7 +179,7 @@ fn parse_infix(cx: &mut ParseContext, left: Expression, right_bp: u8) -> ParseRe
         }
         _ => Expression::Operator(OperatorExpression::Arithmetic {
             left: Box::new(left),
-            op: crate::diagnostic::Spanned::new(bin_op, token.span),
+            op: Spanned::new(bin_op, token.span),
             right,
         }),
     };
@@ -223,7 +212,7 @@ fn parse_postfix(cx: &mut ParseContext, expr: Expression) -> ParseResult<Express
                             // 元组索引访问
                             let index_token = cx.consume()?;
                             if let Token::Literal(literal) = &index_token.value {
-                                if let crate::lexical::Literal::Integer(index) = literal {
+                                if let Literal::Integer(index) = literal {
                                     let index = *index;
                                     if index < 0 || index > u32::MAX as i64 {
                                         return Err(cx.create_error(
@@ -236,7 +225,7 @@ fn parse_postfix(cx: &mut ParseContext, expr: Expression) -> ParseResult<Express
                                     expr = Expression::TupleIndex(TupleIndexingExpression {
                                         expr: Box::new(expr),
                                         dot_token,
-                                        index: crate::diagnostic::Spanned::new(
+                                        index: Spanned::new(
                                             index as u32,
                                             index_token.span,
                                         ),
@@ -269,7 +258,7 @@ fn parse_postfix(cx: &mut ParseContext, expr: Expression) -> ParseResult<Express
 
                 expr = Expression::Call(CallExpression {
                     expr: Box::new(expr),
-                    paren_token: crate::lexical::Paren::new(lparen, rparen),
+                    paren_token: Paren::new(lparen, rparen),
                     args,
                 });
             }
@@ -281,7 +270,7 @@ fn parse_postfix(cx: &mut ParseContext, expr: Expression) -> ParseResult<Express
 
                 expr = Expression::Index(IndexExpression {
                     expr: Box::new(expr),
-                    bracket_token: crate::lexical::Bracket::new(lbracket, rbracket),
+                    bracket_token: Bracket::new(lbracket, rbracket),
                     index: Box::new(index),
                 });
             }
@@ -302,61 +291,61 @@ fn parse_postfix(cx: &mut ParseContext, expr: Expression) -> ParseResult<Express
 }
 
 /// 从token获取二元运算符
-fn get_bin_op(token: &Token) -> Option<crate::syntax::operators::BinOp> {
+fn get_bin_op(token: &Token) -> Option<BinOp> {
     match token {
-        Token::Symbol(Symbol::Eq) => Some(crate::syntax::operators::BinOp::Assign),
-        Token::Symbol(Symbol::Plus) => Some(crate::syntax::operators::BinOp::Add),
-        Token::Symbol(Symbol::Minus) => Some(crate::syntax::operators::BinOp::Sub),
-        Token::Symbol(Symbol::Star) => Some(crate::syntax::operators::BinOp::Mul),
-        Token::Symbol(Symbol::Slash) => Some(crate::syntax::operators::BinOp::Div),
-        Token::Symbol(Symbol::Percent) => Some(crate::syntax::operators::BinOp::Rem),
-        Token::Symbol(Symbol::And) => Some(crate::syntax::operators::BinOp::BitAnd),
-        Token::Symbol(Symbol::Or) => Some(crate::syntax::operators::BinOp::BitOr),
-        Token::Symbol(Symbol::Caret) => Some(crate::syntax::operators::BinOp::BitXor),
-        Token::Symbol(Symbol::Shl) => Some(crate::syntax::operators::BinOp::BitShl),
-        Token::Symbol(Symbol::Shr) => Some(crate::syntax::operators::BinOp::BitShr),
-        Token::Symbol(Symbol::AndAnd) => Some(crate::syntax::operators::BinOp::LogicAnd),
-        Token::Symbol(Symbol::OrOr) => Some(crate::syntax::operators::BinOp::LogicOr),
-        Token::Symbol(Symbol::EqEq) => Some(crate::syntax::operators::BinOp::Eq),
-        Token::Symbol(Symbol::Ne) => Some(crate::syntax::operators::BinOp::NotEq),
-        Token::Symbol(Symbol::Lt) => Some(crate::syntax::operators::BinOp::LessThen),
-        Token::Symbol(Symbol::Gt) => Some(crate::syntax::operators::BinOp::GreaterThen),
-        Token::Symbol(Symbol::Le) => Some(crate::syntax::operators::BinOp::LessThenOrEq),
-        Token::Symbol(Symbol::Ge) => Some(crate::syntax::operators::BinOp::GreaterThenOrEq),
+        Token::Symbol(Symbol::Eq) => Some(BinOp::Assign),
+        Token::Symbol(Symbol::Plus) => Some(BinOp::Add),
+        Token::Symbol(Symbol::Minus) => Some(BinOp::Sub),
+        Token::Symbol(Symbol::Star) => Some(BinOp::Mul),
+        Token::Symbol(Symbol::Slash) => Some(BinOp::Div),
+        Token::Symbol(Symbol::Percent) => Some(BinOp::Rem),
+        Token::Symbol(Symbol::And) => Some(BinOp::BitAnd),
+        Token::Symbol(Symbol::Or) => Some(BinOp::BitOr),
+        Token::Symbol(Symbol::Caret) => Some(BinOp::BitXor),
+        Token::Symbol(Symbol::Shl) => Some(BinOp::BitShl),
+        Token::Symbol(Symbol::Shr) => Some(BinOp::BitShr),
+        Token::Symbol(Symbol::AndAnd) => Some(BinOp::LogicAnd),
+        Token::Symbol(Symbol::OrOr) => Some(BinOp::LogicOr),
+        Token::Symbol(Symbol::EqEq) => Some(BinOp::Eq),
+        Token::Symbol(Symbol::Ne) => Some(BinOp::NotEq),
+        Token::Symbol(Symbol::Lt) => Some(BinOp::LessThen),
+        Token::Symbol(Symbol::Gt) => Some(BinOp::GreaterThen),
+        Token::Symbol(Symbol::Le) => Some(BinOp::LessThenOrEq),
+        Token::Symbol(Symbol::Ge) => Some(BinOp::GreaterThenOrEq),
         _ => None,
     }
 }
 
 /// 获取运算符的绑定力
-fn get_binding_power(op: &crate::syntax::operators::BinOp) -> (u8, u8) {
+fn get_binding_power(op: &BinOp) -> (u8, u8) {
     match op {
-        crate::syntax::operators::BinOp::Assign => (2, 1),
-        crate::syntax::operators::BinOp::AddAssign
-        | crate::syntax::operators::BinOp::SubAssign
-        | crate::syntax::operators::BinOp::MulAssign
-        | crate::syntax::operators::BinOp::DivAssign
-        | crate::syntax::operators::BinOp::RemAssign => (2, 1),
-        crate::syntax::operators::BinOp::LogicOr => (4, 5),
-        crate::syntax::operators::BinOp::LogicAnd => (6, 7),
-        crate::syntax::operators::BinOp::Eq
-        | crate::syntax::operators::BinOp::NotEq
-        | crate::syntax::operators::BinOp::LessThen
-        | crate::syntax::operators::BinOp::GreaterThen
-        | crate::syntax::operators::BinOp::LessThenOrEq
-        | crate::syntax::operators::BinOp::GreaterThenOrEq => (8, 9),
-        crate::syntax::operators::BinOp::BitOr => (10, 11),
-        crate::syntax::operators::BinOp::BitXor => (12, 13),
-        crate::syntax::operators::BinOp::BitAnd => (14, 15),
-        crate::syntax::operators::BinOp::BitShl | crate::syntax::operators::BinOp::BitShr => {
+        BinOp::Assign => (2, 1),
+        BinOp::AddAssign
+        | BinOp::SubAssign
+        | BinOp::MulAssign
+        | BinOp::DivAssign
+        | BinOp::RemAssign => (2, 1),
+        BinOp::LogicOr => (4, 5),
+        BinOp::LogicAnd => (6, 7),
+        BinOp::Eq
+        | BinOp::NotEq
+        | BinOp::LessThen
+        | BinOp::GreaterThen
+        | BinOp::LessThenOrEq
+        | BinOp::GreaterThenOrEq => (8, 9),
+        BinOp::BitOr => (10, 11),
+        BinOp::BitXor => (12, 13),
+        BinOp::BitAnd => (14, 15),
+        BinOp::BitShl | BinOp::BitShr => {
             (16, 17)
         }
-        crate::syntax::operators::BinOp::Add | crate::syntax::operators::BinOp::Sub => (18, 19),
-        crate::syntax::operators::BinOp::Mul
-        | crate::syntax::operators::BinOp::Div
-        | crate::syntax::operators::BinOp::Rem => (20, 21),
-        crate::syntax::operators::BinOp::Range
-        | crate::syntax::operators::BinOp::RangeInclusive => (22, 23),
-        crate::syntax::operators::BinOp::Cast => (24, 25),
+        BinOp::Add | BinOp::Sub => (18, 19),
+        BinOp::Mul
+        | BinOp::Div
+        | BinOp::Rem => (20, 21),
+        BinOp::Range
+        | BinOp::RangeInclusive => (22, 23),
+        BinOp::Cast => (24, 25),
     }
 }
 
@@ -378,7 +367,7 @@ fn parse_literal(cx: &mut ParseContext) -> ParseResult<LiteralExpression> {
     let token = cx.consume()?;
     if let Token::Literal(lit) = &token.value {
         Ok(LiteralExpression {
-            lit: crate::diagnostic::Spanned {
+            lit: Spanned {
                 value: lit.clone(),
                 span: token.span,
             },
@@ -395,7 +384,7 @@ fn parse_literal(cx: &mut ParseContext) -> ParseResult<LiteralExpression> {
 
 /// 解析路径表达式
 fn parse_path_expression(cx: &mut ParseContext) -> ParseResult<PathExpression> {
-    name::parse_path_in_expression(cx).map(|path| PathExpression::new(path))
+    crate::names::parse_path_in_expression(cx).map(|path| PathExpression::new(path))
 }
 
 /// 解析分组表达式
@@ -405,7 +394,7 @@ fn parse_grouped_expression(cx: &mut ParseContext) -> ParseResult<Expression> {
     let rparen = cx.expect_symbol(Symbol::RParen)?;
 
     Ok(Expression::Grouped(GroupedExpression {
-        paren_token: crate::lexical::Paren::new(lparen, rparen),
+        paren_token: Paren::new(lparen, rparen),
         expr: Box::new(expr),
     }))
 }
@@ -455,13 +444,13 @@ fn parse_block_expression(cx: &mut ParseContext) -> ParseResult<BlockExpression>
     let mut stmts = Vec::new();
 
     while !cx.next_is(|t: &Token| matches!(t, Token::Symbol(Symbol::RBrace))) && !cx.is_eof() {
-        stmts.push(statement::parse_statement(cx)?);
+        stmts.push(Statement::parse(cx)?);
     }
 
     let rbrace = cx.expect_symbol(Symbol::RBrace)?;
 
     Ok(BlockExpression {
-        brace_token: crate::lexical::Brace::new(lbrace, rbrace),
+        brace_token: Brace::new(lbrace, rbrace),
         stmts,
     })
 }
@@ -482,10 +471,10 @@ fn parse_if_expression(cx: &mut ParseContext) -> ParseResult<IfExpression> {
         let else_token = cx.consume()?;
         let else_expr = if cx.next_is(|t: &Token| matches!(t, Token::Keyword(Keyword::If))) {
             parse_if_expression(cx)
-                .map(|expr| crate::syntax::expressions::ElseBranch::If(Box::new(expr)))?
+                .map(|expr| ElseBranch::If(Box::new(expr)))?
         } else {
             parse_block_expression(cx)
-                .map(|expr| crate::syntax::expressions::ElseBranch::Block(expr))?
+                .map(|expr| ElseBranch::Block(expr))?
         };
         Some((else_token, Box::new(else_expr)))
     } else {
@@ -517,7 +506,7 @@ fn parse_match_expression(cx: &mut ParseContext) -> ParseResult<MatchExpression>
     Ok(MatchExpression {
         match_token,
         expr: Box::new(expr),
-        brace_token: crate::lexical::Brace::new(lbrace, rbrace),
+        brace_token: Brace::new(lbrace, rbrace),
         arms,
     })
 }
@@ -551,7 +540,7 @@ fn parse_while_expression(cx: &mut ParseContext) -> ParseResult<WhileLoopExpress
 /// 解析for表达式
 fn parse_for_expression(cx: &mut ParseContext) -> ParseResult<ForLoopExpression> {
     let for_token = cx.expect_keyword(Keyword::For)?;
-    let pat = pattern::parse_pattern(cx)?;
+    let pat = Pattern::parse(cx)?;
     let in_token = cx.expect_keyword(Keyword::In)?;
     let expr = parse_expression(cx)?;
     let body = parse_block_expression(cx)?;
@@ -610,8 +599,8 @@ fn parse_continue_expression(cx: &mut ParseContext) -> ParseResult<ContinueExpre
 fn parse_range(cx: &mut ParseContext, start: Option<Expression>) -> ParseResult<RangeExpression> {
     let token = cx.consume()?;
     let limits = match token.value {
-        Token::Symbol(Symbol::DotDot) => crate::syntax::patterns::RangeLimits::HalfOpen,
-        Token::Symbol(Symbol::DotDotEq) => crate::syntax::patterns::RangeLimits::Closed,
+        Token::Symbol(Symbol::DotDot) => RangeLimits::HalfOpen,
+        Token::Symbol(Symbol::DotDotEq) => RangeLimits::Closed,
         _ => unreachable!(),
     };
 
@@ -633,7 +622,7 @@ fn parse_range(cx: &mut ParseContext, start: Option<Expression>) -> ParseResult<
 
     Ok(RangeExpression {
         start: start.map(Box::new),
-        limits: crate::diagnostic::Spanned::new(limits, token.span),
+        limits: Spanned::new(limits, token.span),
         end,
     })
 }

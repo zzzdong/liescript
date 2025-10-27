@@ -1,0 +1,40 @@
+use std::fmt;
+
+use crate::span::Spanned;
+
+pub type IdentSpan = Spanned<Identifier>;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Identifier(String);
+
+impl Identifier {
+    pub fn new(ident: impl ToString) -> Self {
+        Identifier(ident.to_string())
+    }
+
+    pub fn value(&self) -> &str {
+        &self.0
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl fmt::Display for Identifier {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Ident({})", self.as_str())
+    }
+}
+
+impl From<&str> for Identifier {
+    fn from(s: &str) -> Self {
+        Identifier::new(s)
+    }
+}
+
+impl From<String> for Identifier {
+    fn from(s: String) -> Self {
+        Identifier::new(s)
+    }
+}

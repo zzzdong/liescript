@@ -1,18 +1,18 @@
-//! 语句解析模块
-
-use crate::{
-    lexical::{Keyword, Symbol, Token, TokenSpan},
-    syntax::statements::{EmptyStatement, ExpressionStatement, LetStatement, Statement},
+use liescript_ast::items::Item;
+use liescript_ast::types::Type;
+use liescript_ast::{expressions::Expression, patterns::Pattern};
+use liescript_ast::statements::*;
+use liescript_lexical::{
+    keyword::Keyword, symbol::Symbol, token::{Brace, Paren, Punctuated, Token}, Span, Spanned
 };
 
-use super::{
-    context::ParseContext,
-    diagnostic::{ParseError, ParseResult},
-    expression::parse_expression,
-    item::parse_item,
-    pattern::parse_pattern,
-    r#type::parse_type,
-};
+use crate::{Parse, ParseContext, ParseResult};
+
+impl Parse for Statement {
+    fn parse(cx: &mut ParseContext) -> ParseResult<Self> {
+        parse_statement(cx)
+    }
+}
 
 /// 解析语句
 pub fn parse_statement(cx: &mut ParseContext) -> ParseResult<Statement> {
@@ -34,7 +34,7 @@ pub fn parse_statement(cx: &mut ParseContext) -> ParseResult<Statement> {
                     | Keyword::Mod
                     | Keyword::Use
             ) {
-                return parse_item(cx).map(Statement::Item);
+                return Item::parse(cx).map(Statement::Item);
             }
         }
     }
@@ -61,7 +61,7 @@ fn parse_empty_statement(cx: &mut ParseContext) -> ParseResult<EmptyStatement> {
 
 /// 解析表达式语句
 fn parse_expression_statement(cx: &mut ParseContext) -> ParseResult<ExpressionStatement> {
-    let expr = parse_expression(cx)?;
+    let expr = Expression::parse(cx)?;
 
     // 检查是否需要分号
     let semi_token = if cx.next_is(|t: &Token| matches!(t, Token::Symbol(Symbol::Semi))) {
@@ -76,12 +76,12 @@ fn parse_expression_statement(cx: &mut ParseContext) -> ParseResult<ExpressionSt
 /// 解析let语句
 fn parse_let_statement(cx: &mut ParseContext) -> ParseResult<LetStatement> {
     let let_token = cx.expect_keyword(Keyword::Let)?;
-    let pattern = parse_pattern(cx)?;
+    let pattern = Pattern::parse(cx)?;
 
     // 解析可选的类型注解
     let type_annotation = if cx.next_is(|t: &Token| matches!(t, Token::Symbol(Symbol::Colon))) {
         let colon_token = cx.consume()?;
-        let ty = parse_type(cx)?;
+        let ty = Type::parse(cx)?;
         Some((colon_token, Box::new(ty)))
     } else {
         None
@@ -90,7 +90,7 @@ fn parse_let_statement(cx: &mut ParseContext) -> ParseResult<LetStatement> {
     // 解析可选的初始化表达式
     let initializer = if cx.next_is(|t: &Token| matches!(t, Token::Symbol(Symbol::Eq))) {
         let eq_token = cx.consume()?;
-        let expr = parse_expression(cx)?;
+        let expr = Expression::parse(cx)?;
         Some((eq_token, Box::new(expr)))
     } else {
         None

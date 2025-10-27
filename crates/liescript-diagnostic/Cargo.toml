@@ -1,0 +1,16 @@
+[package]
+name = "liescript_diagnostic"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+codespan-reporting = "0.13"
+serde = { workspace = true }
+serde_json = "1.0"
+lsp-types = "0.95"
+termcolor = "1.4"
+thiserror = "1.0"
+liescript_lexical = { path = "../liescript-lexical" }
+
+[dev-dependencies]
+insta = "1.39"

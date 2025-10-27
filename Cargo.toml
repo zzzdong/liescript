@@ -1,15 +1,8 @@
-[package]
-name = "liescript"
-version = "0.1.0"
-edition = "2024"
+[workspace]
+resolver = "3"
+members = ["crates/*"]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[dependencies]
-codespan-reporting = "0.12"
-petgraph = "0.8"
-log = "0.4"
-
-
-[dev-dependencies]
+[workspace.dependencies]
 env_logger = "0.11"
+log = "0.4"
+serde = { version = "1.0", features = ["derive"] }

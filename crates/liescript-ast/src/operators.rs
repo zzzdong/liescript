@@ -1,9 +1,7 @@
 use std::fmt;
 
-use crate::diagnostic::Spanned;
-use crate::lexical::{
-    Brace, Bracket, IdentSpan, Keyword, LiteralSpan, Paren, Punctuated, Symbol, Token, TokenSpan,
-};
+use liescript_lexical::{ident::IdentSpan, keyword::Keyword, literal::{Literal, LiteralSpan}, symbol::Symbol, token::{Brace, Bracket, Paren, Punctuated, Token, TokenSpan}, HasSpan, Span, Spanned};
+
 
 #[derive(Copy, Clone, Eq, PartialEq, PartialOrd, Ord, Hash, Debug)]
 pub enum UnOp {
