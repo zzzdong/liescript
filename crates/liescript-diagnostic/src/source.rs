@@ -198,7 +198,7 @@ mod tests {
         assert_eq!(file.line_content(2), Some("line3"));
 
         let pos = file.position(8); // 'line2'的第二个字符
-        assert_eq!(pos, Some((1, 1)));
+        assert_eq!(pos, Some((1, 2)));
     }
 
     #[test]

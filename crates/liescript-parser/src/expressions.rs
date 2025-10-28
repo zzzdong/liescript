@@ -1,9 +1,17 @@
 //! 表达式解析模块 (使用Pratt parser)
 
-use liescript_ast::{expressions::{
-    ArrayExpression, BlockExpression, BreakExpression, CallExpression, ContinueExpression, ElseBranch, Expression, FieldExpression, ForLoopExpression, GroupedExpression, IfExpression, IndexExpression, LiteralExpression, LoopExpression, MatchExpression, OperatorExpression, PathExpression, RangeExpression, ReturnExpression, TupleIndexingExpression, UnderscoreExpression, WhileLoopExpression
-}, operators::{BinOp, UnOp}, patterns::{Pattern, RangeLimits}, statements::Statement};
-use liescript_lexical::{keyword::Keyword, literal::Literal, symbol::Symbol, token::{Brace, Bracket, Paren, Punctuated, Token}, Spanned};
+use liescript_ast::{
+    Type, expressions::{
+        ArrayExpression, BlockExpression, BreakExpression, CallExpression, ClosureExpression, ClosureParam, ContinueExpression, ElseBranch, Expression, FieldExpression, ForLoopExpression, GroupedExpression, IfExpression, IndexExpression, LiteralExpression, LoopExpression, MatchExpression, MethodCallExpression, OperatorExpression, PathExpression, RangeExpression, ReturnExpression, TupleIndexingExpression, UnderscoreExpression, WhileLoopExpression
+    }, operators::{BinOp, UnOp}, patterns::{Pattern, RangeLimits}, statements::Statement
+};
+use liescript_lexical::{
+    Spanned,
+    keyword::Keyword,
+    literal::Literal,
+    symbol::Symbol,
+    token::{Brace, Bracket, Paren, Punctuated, Token, TokenSpan},
+};
 
 use super::{
     Parse,
@@ -100,6 +108,9 @@ fn parse_primary(cx: &mut ParseContext) -> ParseResult<Expression> {
                 Symbol::LBracket => parse_array_expression(cx).map(Into::into),
                 Symbol::LBrace => parse_block_expression(cx).map(Into::into),
                 Symbol::Underscore => parse_underscore_expression(cx).map(Into::into),
+                Symbol::Or | Symbol::OrOr => {
+                    parse_closure(cx).map(|expr| Expression::Closure(expr))
+                }
                 _ => Err(cx.create_error(
                     "Unexpected symbol".to_string(),
                     token_span,
@@ -170,13 +181,11 @@ fn parse_infix(cx: &mut ParseContext, left: Expression, right_bp: u8) -> ParseRe
     let right = Box::new(parse_expr(cx, right_bp)?);
 
     let expr = match bin_op {
-        BinOp::Assign => {
-            Expression::Operator(OperatorExpression::Assign {
-                left: Box::new(left),
-                eq_token: token,
-                right,
-            })
-        }
+        BinOp::Assign => Expression::Operator(OperatorExpression::Assign {
+            left: Box::new(left),
+            eq_token: token,
+            right,
+        }),
         _ => Expression::Operator(OperatorExpression::Arithmetic {
             left: Box::new(left),
             op: Spanned::new(bin_op, token.span),
@@ -225,10 +234,7 @@ fn parse_postfix(cx: &mut ParseContext, expr: Expression) -> ParseResult<Express
                                     expr = Expression::TupleIndex(TupleIndexingExpression {
                                         expr: Box::new(expr),
                                         dot_token,
-                                        index: Spanned::new(
-                                            index as u32,
-                                            index_token.span,
-                                        ),
+                                        index: Spanned::new(index as u32, index_token.span),
                                     });
                                 } else {
                                     return Err(cx.create_error(
@@ -256,11 +262,31 @@ fn parse_postfix(cx: &mut ParseContext, expr: Expression) -> ParseResult<Express
 
                 let rparen = cx.expect_symbol(Symbol::RParen)?;
 
-                expr = Expression::Call(CallExpression {
-                    expr: Box::new(expr),
-                    paren_token: Paren::new(lparen, rparen),
-                    args,
-                });
+                // when expr is FieldExpression, it should be changed to MethodCallExpression
+                expr = match expr {
+                    Expression::Field(FieldExpression {
+                        expr,
+                        dot_token,
+                        field,
+                    }) => Expression::MethodCall(MethodCallExpression {
+                        expr,
+                        dot_token,
+                        method: field,
+                        paren_token: Paren {
+                            open: lparen,
+                            close: rparen,
+                        },
+                        args,
+                    }),
+                    _ => Expression::Call(CallExpression {
+                        expr: Box::new(expr),
+                        paren_token: Paren {
+                            open: lparen,
+                            close: rparen,
+                        },
+                        args,
+                    }),
+                }
             }
 
             &Token::Symbol(Symbol::LBracket) => {
@@ -336,15 +362,10 @@ fn get_binding_power(op: &BinOp) -> (u8, u8) {
         BinOp::BitOr => (10, 11),
         BinOp::BitXor => (12, 13),
         BinOp::BitAnd => (14, 15),
-        BinOp::BitShl | BinOp::BitShr => {
-            (16, 17)
-        }
+        BinOp::BitShl | BinOp::BitShr => (16, 17),
         BinOp::Add | BinOp::Sub => (18, 19),
-        BinOp::Mul
-        | BinOp::Div
-        | BinOp::Rem => (20, 21),
-        BinOp::Range
-        | BinOp::RangeInclusive => (22, 23),
+        BinOp::Mul | BinOp::Div | BinOp::Rem => (20, 21),
+        BinOp::Range | BinOp::RangeInclusive => (22, 23),
         BinOp::Cast => (24, 25),
     }
 }
@@ -461,6 +482,87 @@ fn parse_underscore_expression(cx: &mut ParseContext) -> ParseResult<UnderscoreE
     Ok(UnderscoreExpression { underscore_token })
 }
 
+/// 解析闭包表达式
+fn parse_closure(cx: &mut ParseContext) -> ParseResult<ClosureExpression> {
+    // try parse || expr, `||` will be parsed as a binary operator
+    if let Some(expr) = cx.try_parse(|s| {
+        let oror_token = s.expect_symbol(Symbol::OrOr)?;
+        // split ||
+        let span = oror_token.span.clone();
+        let (span1, span2) = span.split(1);
+        let or1_token = TokenSpan::new(Token::Symbol(Symbol::Or), span1);
+        let or2_token = TokenSpan::new(Token::Symbol(Symbol::Or), span2);
+
+        let body = Box::new(parse_expression(s)?);
+        Ok(ClosureExpression {
+            move_token: None,
+            or_token: (or1_token, or2_token),
+            inputs: Punctuated::new(),
+            output: None,
+            body,
+        })
+    }) {
+        return Ok(expr);
+    }
+
+    let or1_token = cx.consume()?;
+    // 尝试解析无参数闭包 || expr
+    let result = cx.try_parse(|s| {
+        let or2_token = s.expect_symbol(Symbol::Or)?;
+        let body = Box::new(parse_expression(s)?);
+        Ok(ClosureExpression {
+            move_token: None,
+            or_token: (or1_token.clone(), or2_token),
+            inputs: Punctuated::new(),
+            output: None,
+            body,
+        })
+    });
+
+    if let Some(closure) = result {
+        return Ok(closure);
+    }
+
+    // 解析带参数的闭包
+    let inputs =
+        cx.parse_punctuated(parse_closure_param, Symbol::Comma)?;
+    let or2_token = cx.expect_symbol(Symbol::Or)?;
+
+    // 可选的返回类型
+    let output = cx
+        .next_is(Symbol::RArrow)
+        .then(|| Ok((cx.consume()?, Box::new(Type::parse(cx)?))))
+        .transpose()?;
+
+    let body = Box::new(parse_expression(cx)?);
+
+    Ok(ClosureExpression {
+        move_token: None,
+        or_token: (or1_token, or2_token),
+        inputs,
+        output,
+        body,
+    })
+}
+
+fn parse_closure_param(cx: &mut ParseContext) -> ParseResult<ClosureParam> {
+    let pattern = Pattern::parse(cx)?;
+
+    if cx.next_is(Symbol::Colon) {
+        return Ok(ClosureParam {
+            pattern,
+            colon_token: Some(cx.consume()?),
+            ty: Some(Box::new(Type::parse(cx)?)),
+        });
+    }
+
+    Ok(ClosureParam {
+        pattern,
+        colon_token: None,
+        ty: None,
+    })
+}
+
 /// 解析if表达式
 fn parse_if_expression(cx: &mut ParseContext) -> ParseResult<IfExpression> {
     let if_token = cx.expect_keyword(Keyword::If)?;
@@ -470,11 +572,9 @@ fn parse_if_expression(cx: &mut ParseContext) -> ParseResult<IfExpression> {
     let else_branch = if cx.next_is(|t: &Token| matches!(t, Token::Keyword(Keyword::Else))) {
         let else_token = cx.consume()?;
         let else_expr = if cx.next_is(|t: &Token| matches!(t, Token::Keyword(Keyword::If))) {
-            parse_if_expression(cx)
-                .map(|expr| ElseBranch::If(Box::new(expr)))?
+            parse_if_expression(cx).map(|expr| ElseBranch::If(Box::new(expr)))?
         } else {
-            parse_block_expression(cx)
-                .map(|expr| ElseBranch::Block(expr))?
+            parse_block_expression(cx).map(|expr| ElseBranch::Block(expr))?
         };
         Some((else_token, Box::new(else_expr)))
     } else {
@@ -633,6 +733,14 @@ impl Parse for Expression {
         parse_expression(cx)
     }
 }
+
+impl Parse for LiteralExpression {
+    fn parse(cx: &mut ParseContext) -> ParseResult<Self> {
+        parse_literal(cx)
+    }
+}
+
+
 
 fn parse_u32(cx: &mut ParseContext) -> ParseResult<Spanned<u32>> {
     let token = cx

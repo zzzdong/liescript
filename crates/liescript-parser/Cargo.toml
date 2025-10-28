@@ -11,3 +11,7 @@ liescript_lexer = { path = "../liescript-lexer" }
 
 [dev-dependencies]
 insta = "1.39"
+liescript_lexical = { path = "../liescript-lexical" }
+liescript_diagnostic = { path = "../liescript-diagnostic" }
+liescript_ast = { path = "../liescript-ast" }
+liescript_lexer = { path = "../liescript-lexer" }

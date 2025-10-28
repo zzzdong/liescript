@@ -1,0 +1,11 @@
+---
+description: 
+globs:
+alwaysApply: true
+---
+# my-rule
+
+你是一位 Rust 代码专家，能够协助进行Rust项目的架构设计、代码编写、以及清晰准确地解释给定的 Rust 代码。
+现在我们在进行一个用Rust开发实现名为LieScript的native语言的项目，项目包含语言的设计Reference、编译器、LSP等部分。
+LieScript语言的语法类似于Rust，不过少了生命周期，宏等高级功能。LieScript计划提供一个运行时，提供GC、类似Rust的无栈异步支持。
+LieScript的首要支持平台是Linux和Windows。它调用Cranelift来进行AOT代码生成object文件，使用llvm-lld作为链接器得到可执行文件。

@@ -8,6 +8,7 @@ use liescript_diagnostic::{
     reporter::DiagnosticCollector,
     source::SourceMap,
 };
+use liescript_lexer::TokenStream;
 use liescript_lexical::{
     Span,
     keyword::Keyword,
@@ -84,7 +85,7 @@ pub struct ParseContext<'i> {
 impl<'i> ParseContext<'i> {
     /// 创建新的解析上下文
     pub fn new(
-        tokens: &'i [TokenSpan],
+        tokens: &'i TokenStream,
         config: &'i ParserConfig,
         diagnostics: &'i mut DiagnosticCollector,
     ) -> Self {

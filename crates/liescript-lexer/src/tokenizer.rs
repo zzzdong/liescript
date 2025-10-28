@@ -1,8 +1,13 @@
 use std::str::Chars;
 
-use liescript_lexical::{ident::Identifier, keyword::Keyword, literal::Literal, symbol::Symbol, token::{Token, TokenSpan}, FileId, Span, Spanned};
-
-
+use liescript_lexical::{
+    FileId, Span, Spanned,
+    ident::Identifier,
+    keyword::Keyword,
+    literal::Literal,
+    symbol::Symbol,
+    token::{Token, TokenSpan},
+};
 
 #[derive(Debug)]
 pub struct TokenError {
@@ -110,8 +115,13 @@ impl<'i> Tokenizer<'i> {
                         if self.starts_with("//") {
                             return self.eat_comment();
                         }
-                        // symbol
-                        self.eat_symbol(c)
+                        // try symbols
+                        if let Some(t) = self.eat_symbol(c) {
+                            return Ok(t);
+                        }
+
+                        // otherwise, it's a unicode character identifier
+                        self.eat_ident()
                     }
                 }
             }
@@ -190,7 +200,7 @@ impl<'i> Tokenizer<'i> {
             return self.eat_byte_slice();
         }
 
-        let got = self.eat_while(|c| c.is_ascii_alphanumeric() || c == '_');
+        let got = self.eat_while(|c| c.is_alphabetic() || c.is_numeric() || c == '_');
 
         let token = match got {
             "_" => Token::Symbol(Symbol::Underscore),
@@ -243,7 +253,7 @@ impl<'i> Tokenizer<'i> {
         let number = i.to_string().replace("_", "");
 
         number.parse::<i64>().map(Token::int).map_err(|e| {
-            TokenError::new("parse float failed")
+            TokenError::new("parse integer failed")
                 .with_source(e)
                 .with_span(Span::new(self.file, start, self.pos()))
         })
@@ -400,14 +410,14 @@ impl<'i> Tokenizer<'i> {
         }
     }
 
-    fn eat_symbol(&mut self, peek: char) -> Result<Token, TokenError> {
+    fn eat_symbol(&mut self, peek: char) -> Option<Token> {
         // 优化：优先处理3字符标点
         if let Some(p) = match (peek, self.peek_n(1), self.peek_n(2)) {
             ('.', Some('.'), Some('=')) => Some((Symbol::DotDotEq, 3)),
             _ => None,
         } {
             self.advance(p.1);
-            return Ok(Token::Symbol(p.0));
+            return Some(Token::Symbol(p.0));
         }
 
         // 优化：直接处理2字符标点
@@ -435,7 +445,7 @@ impl<'i> Tokenizer<'i> {
             _ => None,
         } {
             self.advance(p.1);
-            return Ok(Token::Symbol(p.0));
+            return Some(Token::Symbol(p.0));
         }
 
         let token = match peek {
@@ -469,10 +479,10 @@ impl<'i> Tokenizer<'i> {
 
         if let Some(p) = token {
             self.advance(1);
-            return Ok(Token::Symbol(p));
+            return Some(Token::Symbol(p));
         }
 
-        Err(TokenError::new(format!("unknown punctuation({peek})")))
+        None
     }
 }
 
@@ -520,7 +530,7 @@ impl TokenStream {
         Ok(TokenStream { tokens })
     }
 
-    pub fn iter<'i>(&'i self) -> std::slice::Iter<'_, TokenSpan> {
+    pub fn iter<'i>(&'i self) -> std::slice::Iter<'i, TokenSpan> {
         self.tokens.iter()
     }
 }
@@ -531,6 +541,19 @@ mod test {
 
     #[test]
     fn test_tokenize_identifier() {
+        let inputs = ["x", "x1", "_a", "_1", "a_b", "β", "变量"];
+
+        for input in inputs {
+            let tokenizer = Tokenizer::new(FileId::default(), input);
+
+            let tokens = tokenizer
+                .into_iter()
+                .filter_map(|r| r.ok().map(|span| span.value))
+                .collect::<Vec<_>>();
+
+            assert!(matches!(tokens[0], Token::Ident(_)));
+        }
+
         let input = "let x = 5;";
         let tokenizer = Tokenizer::new(FileId::default(), input);
 
